@@ -20,11 +20,11 @@
 
 **Purpose**: Project initialization, environment setup, and dependency configuration across backend and frontend
 
-- [ ] T001 Initialize backend Python 3.12 project structure, virtual environment, and dependency manifest in `backend/requirements.txt` and `backend/pyproject.toml`
-- [ ] T002 [P] Initialize frontend React + TypeScript + Vite project with Tailwind CSS and dependencies in `frontend/package.json`, `frontend/vite.config.ts`, `frontend/tsconfig.json`, and `frontend/tailwind.config.ts`
-- [ ] T003 [P] Configure backend test harness and shared pytest fixtures in `backend/tests/conftest.py`
-- [ ] T004 [P] Configure frontend Playwright test configuration in `frontend/playwright.config.ts`
-- [ ] T005 [P] Create application configuration module managing environment variables, FastF1 cache path, DuckDB file path, and Gemini API keys in `backend/app/config.py`
+- [X] T001 Initialize backend Python 3.12 project structure, virtual environment, and dependency manifest in `backend/requirements.txt` and `backend/pyproject.toml`
+- [X] T002 [P] Initialize frontend React + TypeScript + Vite project with Tailwind CSS and dependencies in `frontend/package.json`, `frontend/vite.config.ts`, `frontend/tsconfig.json`, and `frontend/tailwind.config.ts`
+- [X] T003 [P] Configure backend test harness and shared pytest fixtures in `backend/tests/conftest.py`
+- [X] T004 [P] Configure frontend Playwright test configuration in `frontend/playwright.config.ts`
+- [X] T005 [P] Create application configuration module managing environment variables, FastF1 cache path, DuckDB file path, and Gemini API keys in `backend/app/config.py`
 
 ---
 
@@ -34,17 +34,17 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this foundational phase is complete.
 
-- [ ] T006 Implement DuckDB manager with Kaggle CSV ingestion logic converting `\N` sentinels to `NULL` for all tables in `backend/app/data/duckdb_manager.py` (cites `data-model.md`: `circuits.circuitId`, `circuits.name`, `constructors.constructorId`, `constructors.name`, `drivers.driverId`, `drivers.forename`, `races.raceId`, `races.round`, `races.name`, `races.date`, `results.resultId`, `results.points`, `results.laps`, `qualifying.qualifyId`, `lap_times.raceId`, `pit_stops.raceId`, `driver_standings.driverStandingsId`, `constructor_standings.constructorStandingsId`, `status.statusId`)
-- [ ] T007 [P] Create curated read-only DuckDB SQL views (`v_race_results`, `v_qualifying`, `v_pit_stops`, `v_driver_standings`, `v_constructor_standings`) in `backend/app/data/views.py` (cites `data-model.md`: `v_race_results`, `v_qualifying`, `v_pit_stops`, `v_driver_standings`, `v_constructor_standings`)
-- [ ] T008 [P] Implement read-only SQL guardrail validator rejecting all mutating statements (INSERT, UPDATE, DELETE, DROP, ALTER) in `backend/app/data/duckdb_manager.py`
-- [ ] T009 [P] Initialize FastF1 disk cache manager with cache-first fallback and retry helper in `backend/app/data/fastf1_cache.py` (cites `data-model.md`: FastF1 cache `./data/fastf1_cache`)
-- [ ] T010 [P] Implement curated corner nickname mapping loader in `backend/app/data/entity_resolver.py` parsing `backend/data/corner_nicknames.json` (cites `data-model.md`: `Corner.turn_number`, `Corner.distance_m`, `Corner.nickname`, `Corner.circuit_key`)
-- [ ] T011 Implement fuzzy driver and circuit entity resolver matching name variants to canonical driver codes and circuit IDs in `backend/app/data/entity_resolver.py` (cites `data-model.md`: `drivers.code`, `drivers.surname`, `circuits.circuitRef`)
-- [ ] T012 Implement JWT authentication service, password hashing, and user dependencies in `backend/app/auth/dependencies.py` and router in `backend/app/auth/router.py` (cites `data-model.md`: `UserAccount.user_id`, `UserAccount.email`, `UserAccount.password_hash`, contracts: `POST /api/auth/login`, `POST /api/auth/register`)
-- [ ] T013 [P] Implement in-memory conversation session context manager with rolling summary + last 4–6 verbatim turns in `backend/app/chat/session.py` (cites `data-model.md`: `ConversationSession.session_id`, `ConversationSession.rolling_summary`, `ConversationSession.recent_turns`)
-- [ ] T014 [P] Implement SSE event formatting helpers (`session`, `status`, `text`, `chart`, `trace`, `error`, `done`) in `backend/app/chat/streaming.py` (cites `contracts/api-contracts.md`: SSE Event Type Summary)
-- [ ] T015 Implement dark HUD Plotly template with base `#0B0F17` background and WCAG AA contrast styling in `backend/app/charts/plotly_theme.py`
-- [ ] T016 Setup FastAPI application with CORS, exception handlers, health endpoint `GET /api/health`, and authentication middleware in `backend/app/main.py` (cites `contracts/api-contracts.md`: `GET /api/health`)
+- [X] T006 Implement DuckDB manager with Kaggle CSV ingestion logic converting `\N` sentinels to `NULL` for all tables in `backend/app/data/duckdb_manager.py` (cites `data-model.md`: `circuits.circuitId`, `circuits.name`, `constructors.constructorId`, `constructors.name`, `drivers.driverId`, `drivers.forename`, `races.raceId`, `races.round`, `races.name`, `races.date`, `results.resultId`, `results.points`, `results.laps`, `qualifying.qualifyId`, `lap_times.raceId`, `pit_stops.raceId`, `driver_standings.driverStandingsId`, `constructor_standings.constructorStandingsId`, `status.statusId`)
+- [X] T007 [P] Create curated read-only DuckDB SQL views (`v_race_results`, `v_qualifying`, `v_pit_stops`, `v_driver_standings`, `v_constructor_standings`) in `backend/app/data/views.py` (cites `data-model.md`: `v_race_results`, `v_qualifying`, `v_pit_stops`, `v_driver_standings`, `v_constructor_standings`)
+- [X] T008 [P] Implement read-only SQL guardrail validator rejecting all mutating statements (INSERT, UPDATE, DELETE, DROP, ALTER) in `backend/app/data/duckdb_manager.py`
+- [X] T009 [P] Initialize FastF1 disk cache manager with cache-first fallback and retry helper in `backend/app/data/fastf1_cache.py` (cites `data-model.md`: FastF1 cache `./data/fastf1_cache`)
+- [X] T010 [P] Implement curated corner nickname mapping loader in `backend/app/data/entity_resolver.py` parsing `backend/data/corner_nicknames.json` (cites `data-model.md`: `Corner.turn_number`, `Corner.distance_m`, `Corner.nickname`, `Corner.circuit_key`)
+- [X] T011 Implement fuzzy driver and circuit entity resolver matching name variants to canonical driver codes and circuit IDs in `backend/app/data/entity_resolver.py` (cites `data-model.md`: `drivers.code`, `drivers.surname`, `circuits.circuitRef`)
+- [X] T012 Implement JWT authentication service, password hashing, and user dependencies in `backend/app/auth/dependencies.py` and router in `backend/app/auth/router.py` (cites `data-model.md`: `UserAccount.user_id`, `UserAccount.email`, `UserAccount.password_hash`, contracts: `POST /api/auth/login`, `POST /api/auth/register`)
+- [X] T013 [P] Implement in-memory conversation session context manager with rolling summary + last 4–6 verbatim turns in `backend/app/chat/session.py` (cites `data-model.md`: `ConversationSession.session_id`, `ConversationSession.rolling_summary`, `ConversationSession.recent_turns`)
+- [X] T014 [P] Implement SSE event formatting helpers (`session`, `status`, `text`, `chart`, `trace`, `error`, `done`) in `backend/app/chat/streaming.py` (cites `contracts/api-contracts.md`: SSE Event Type Summary)
+- [X] T015 Implement dark HUD Plotly template with base `#0B0F17` background and WCAG AA contrast styling in `backend/app/charts/plotly_theme.py`
+- [X] T016 Setup FastAPI application with CORS, exception handlers, health endpoint `GET /api/health`, and authentication middleware in `backend/app/main.py` (cites `contracts/api-contracts.md`: `GET /api/health`)
 
 **Checkpoint**: Foundation ready — database loaded, auth working, FastF1 cache configured, streaming foundation ready. User story implementation can now begin.
 
