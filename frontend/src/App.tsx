@@ -12,6 +12,7 @@ export default function App() {
     currentStatus,
     currentTrace,
     currentChart,
+    currentMinimap,
     isStreaming,
     sendMessage,
     resetChat,
@@ -79,7 +80,7 @@ export default function App() {
 
         {/* Right Panel: Plotly Telemetry Stage & Trace Drawer (60% width) */}
         <section className="flex flex-1 flex-col overflow-hidden">
-          <ChartStage chart={currentChart} trace={currentTrace} />
+          <ChartStage chart={currentChart} minimap={currentMinimap} trace={currentTrace} />
         </section>
       </main>
     </div>

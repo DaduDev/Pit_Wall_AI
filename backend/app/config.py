@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     KAGGLE_DATA_DIR: Path = ROOT_DIR / "data" / "kaggle"
     DUCKDB_PATH: Path = ROOT_DIR / "data" / "f1_data.duckdb"
     FASTF1_CACHE_DIR: Path = ROOT_DIR / "data" / "fastf1_cache"
+    OPENF1_BASE_URL: str = "https://api.openf1.org/v1"
+    OPENF1_CACHE_DIR: Path = ROOT_DIR / "data" / "openf1_cache"
     CORNER_NICKNAMES_PATH: Path = ROOT_DIR / "data" / "corner_nicknames.json"
 
 
@@ -53,3 +55,4 @@ settings = Settings()
 # Ensure directories exist
 settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
 settings.FASTF1_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+settings.OPENF1_CACHE_DIR.mkdir(parents=True, exist_ok=True)

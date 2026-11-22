@@ -2,9 +2,10 @@
 Plotly HUD Theme and Dynamic Team Color Resolver for PitWall AI.
 Implements the dark HUD theme standard with canvas background #0B0F17,
 panel background #121824, and WCAG AA compliant text contrast.
+Provides teammate color collision handling.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 import fastf1.plotting
 
 # Official Dark HUD Theme Palette
@@ -17,6 +18,8 @@ HUD_TEXT_MUTED = "#94A3B8"
 HUD_TEXT_NORMAL = "#E2E8F0"
 HUD_TEXT_BRIGHT = "#FFFFFF"
 HUD_ACCENT_RED = "#E10600"
+HUD_ACCENT_CYAN = "#38BDF8"
+HUD_ACCENT_YELLOW = "#FACC15"
 
 # Fallback team colors in hex if FastF1 session does not contain specific mapping
 FALLBACK_TEAM_COLORS = {
@@ -123,13 +126,36 @@ def resolve_team_color(team_name: str, session: Optional[Any] = None) -> str:
                 break
 
     if not color:
-        color = "#38BDF8"  # Default bright cyan
+        color = HUD_ACCENT_CYAN  # Default bright cyan
 
     # Validate contrast against #0B0F17:
-    # If luminance is too dark (e.g. dark navy/black), boost to visible tone
     lum = calculate_luminance(color)
     if lum < 0.08:
         # Brighten dark colors
         color = "#60A5FA"
 
     return color
+
+
+def get_driver_trace_styles(
+    color_1: str,
+    color_2: str,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Resolves line trace styles (color, dash) for two drivers.
+    If both drivers share the same team color (teammates), automatically
+    distinguishes Driver 2 with a dashed line and high-contrast secondary accent.
+    """
+    c1 = color_1.upper()
+    c2 = color_2.upper()
+
+    style_1 = {"color": color_1, "dash": "solid", "width": 2.2}
+
+    if c1 == c2:
+        # Teammate collision: style Driver 2 with dashed line and high-contrast accent
+        alt_color = HUD_ACCENT_YELLOW if c1 != HUD_ACCENT_YELLOW else HUD_ACCENT_CYAN
+        style_2 = {"color": alt_color, "dash": "dash", "width": 2.0}
+    else:
+        style_2 = {"color": color_2, "dash": "solid", "width": 2.2}
+
+    return style_1, style_2

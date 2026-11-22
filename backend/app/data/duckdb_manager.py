@@ -78,19 +78,31 @@ class DuckDBManager:
         self.csv_dir = csv_dir or settings.KAGGLE_DATA_DIR
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
 
-    def get_connection(self) -> duckdb.DuckDBPyConnection:
-        """Returns active DuckDB connection, initializing if necessary."""
-        if self._conn is None:
-            if self.db_path == ":memory:":
-                self._conn = duckdb.connect(":memory:")
+    def get_connection(self, read_only: Optional[bool] = None) -> duckdb.DuckDBPyConnection:
+        """
+        Returns active DuckDB connection, initializing if necessary.
+        Defaults to read_only=True if db_file exists, allowing concurrent readers (e.g. Uvicorn + tests).
+        Pass read_only=False explicitly only for ingestion or creating views.
+        """
+        if self._conn is not None:
+            return self._conn
+
+        if self.db_path == ":memory:":
+            self._conn = duckdb.connect(":memory:")
+            return self._conn
+
+        db_file = Path(self.db_path)
+        db_file.parent.mkdir(parents=True, exist_ok=True)
+
+        want_read_only = (db_file.exists() and db_file.stat().st_size > 0) if read_only is None else read_only
+
+        try:
+            self._conn = duckdb.connect(str(db_file), read_only=want_read_only)
+        except duckdb.IOException:
+            if not want_read_only:
+                self._conn = duckdb.connect(str(db_file), read_only=True)
             else:
-                db_file = Path(self.db_path)
-                db_file.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    self._conn = duckdb.connect(str(db_file), read_only=False)
-                except duckdb.IOException:
-                    # Fallback to read_only if locked by another active process (e.g. Uvicorn on Windows)
-                    self._conn = duckdb.connect(str(db_file), read_only=True)
+                raise
         return self._conn
 
     def ingest_all_csvs(self, csv_dir: Optional[Path] = None, force_reload: bool = False) -> Dict[str, int]:
@@ -99,7 +111,9 @@ class DuckDBManager:
         Converts '\\N' strings to NULL sentinels automatically during ingestion.
         """
         target_dir = csv_dir or self.csv_dir
-        conn = self.get_connection()
+        if self.db_path != ":memory:":
+            self.close()
+        conn = self.get_connection(read_only=False)
         csv_files = list(Path(target_dir).glob("*.csv"))
         
         if not csv_files:
@@ -126,8 +140,13 @@ class DuckDBManager:
 
     def create_views(self) -> List[str]:
         """Creates the 5 curated read-only views."""
-        conn = self.get_connection()
-        return create_curated_views(conn)
+        if self.db_path != ":memory:":
+            self.close()
+        conn = self.get_connection(read_only=False)
+        views = create_curated_views(conn)
+        if self.db_path != ":memory:":
+            self.close()
+        return views
 
     def execute_query(self, sql: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """

@@ -11,7 +11,7 @@ SELECT
     con.constructorId AS constructor_id,
     (d.forename || ' ' || d.surname) AS driver_name,
     r.year, r.round, r.name AS grand_prix, r.date AS race_date,
-    c.name AS circuit, c.country,
+    c.name AS circuit, c.country AS circuit_country, c.location AS circuit_location, c.circuitRef AS circuit_ref, c.country,
     d.code AS driver_code, d.forename, d.surname, d.nationality AS driver_nationality,
     con.name AS constructor, con.nationality AS constructor_nationality,
     res.grid, res.position, res.positionText, res.points, res.laps,
@@ -33,13 +33,15 @@ SELECT
     d.driverId AS driver_id,
     (d.forename || ' ' || d.surname) AS driver_name,
     r.year, r.round, r.name AS grand_prix,
+    c.name AS circuit, c.country AS circuit_country, c.location AS circuit_location, c.circuitRef AS circuit_ref, c.country,
     d.code AS driver_code, d.forename, d.surname,
     con.name AS constructor,
     q.position, q.q1, q.q2, q.q3
 FROM qualifying q
 JOIN races r ON q.raceId = r.raceId
 JOIN drivers d ON q.driverId = d.driverId
-JOIN constructors con ON q.constructorId = con.constructorId;
+JOIN constructors con ON q.constructorId = con.constructorId
+JOIN circuits c ON r.circuitId = c.circuitId;
 """
 
 V_PIT_STOPS_SQL = """
@@ -49,6 +51,7 @@ SELECT
     d.driverId AS driver_id,
     (d.forename || ' ' || d.surname) AS driver_name,
     r.year, r.round, r.name AS grand_prix,
+    c.name AS circuit, c.country AS circuit_country, c.location AS circuit_location, c.circuitRef AS circuit_ref, c.country,
     d.code AS driver_code, d.surname,
     con.name AS constructor,
     ps.stop, ps.lap, ps.duration, ps.milliseconds AS duration_ms
@@ -59,7 +62,8 @@ JOIN constructors con ON (
     SELECT res.constructorId FROM results res
     WHERE res.raceId = ps.raceId AND res.driverId = ps.driverId
     LIMIT 1
-) = con.constructorId;
+) = con.constructorId
+JOIN circuits c ON r.circuitId = c.circuitId;
 """
 
 V_DRIVER_STANDINGS_SQL = """

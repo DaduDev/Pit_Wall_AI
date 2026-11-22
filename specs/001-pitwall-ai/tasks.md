@@ -85,22 +85,22 @@
 
 ### Tests for User Story 2
 
-- [ ] T028 [P] [US2] Create unit test suite for fuzzy entity resolver (drivers, circuits, corner nicknames) in `backend/tests/test_entity_resolver.py`
-- [ ] T029 [P] [US2] Create integration test suite for 1-meter interpolation and ±200m corner slicing math using cached 2024 British GP Qualifying fixture in `backend/tests/test_corner_slicing.py`
+- [X] T028 [P] [US2] Create unit test suite for fuzzy entity resolver (drivers, circuits, corner nicknames) in `backend/tests/test_entity_resolver.py`
+- [X] T029 [P] [US2] Create integration test suite for 1-meter interpolation and ±200m corner slicing math using cached 2024 British GP Qualifying fixture in `backend/tests/test_corner_slicing.py`
 
 ### Implementation for User Story 2
 
-- [ ] T030 [P] [US2] Implement telemetry data loader with 1-meter spatial distance interpolation using `scipy`/`numpy` in `backend/app/agent/tools/telemetry.py` (cites `data-model.md`: `TelemetryLap.Distance`, `TelemetryLap.Speed`, `TelemetryLap.Throttle`, `TelemetryLap.Brake`, `TelemetryLap.nGear`, `TelemetryLap.RPM`, `TelemetryLap.DRS`, `TelemetryLap.X`, `TelemetryLap.Y`, `TelemetryLap.Z`)
-- [ ] T031 [P] [US2] Implement dynamic team color resolver querying `fastf1.plotting.get_team_color()` for season with contrast validation against `#0B0F17` in `backend/app/charts/plotly_theme.py` (cites `data-model.md`: `SessionMetadata.team_color`)
-- [ ] T032 [US2] Implement corner slicing tool calculating the 5 corner metrics (braking point delta, apex min speed, lowest gear, full-throttle pickup, corner time delta) across ±200m in `backend/app/agent/tools/corner_compare.py` (cites `data-model.md`: Computed Corner Metrics)
-- [ ] T033 [US2] Implement multi-panel synchronized Plotly chart builder (Speed, Delta, Throttle, Brake, Gear) and GPS track coordinate builder in `backend/app/charts/telemetry_charts.py`
-- [ ] T034 [P] [US2] Implement session and lap metadata extraction (GP name, year, session type, lap number, driver code, compound, weather) in `backend/app/agent/tools/telemetry.py` (cites `data-model.md`: `SessionMetadata.event_name`, `SessionMetadata.year`, `SessionMetadata.session_type`, `SessionMetadata.driver_code`, `SessionMetadata.compound`)
-- [ ] T035 [US2] Register corner comparison tool in Google ADK agent with race-engineer commentary prompt grounded in computed metrics in `backend/app/agent/orchestrator.py` and `backend/app/agent/prompts/system.py`
-- [ ] T036 [US2] Connect corner comparison tool execution and trace payload emission in `backend/app/chat/router.py` (cites `contracts/api-contracts.md`: `event: trace` with `telemetry_params`)
-- [ ] T037 [P] [US2] Implement session metadata bar component in `frontend/src/components/MetadataBar/MetadataBar.tsx`
-- [ ] T038 [P] [US2] Implement zoomed GPS track mini-map component colored by faster driver in `frontend/src/components/ChartStage/TrackMiniMap.tsx`
-- [ ] T039 [US2] Enhance frontend Plotly chart stage to support synchronized multi-panel telemetry charts and tooltips in `frontend/src/components/ChartStage/PlotlyChart.tsx`
-- [ ] T040 [US2] Add preset prompts for famous corners (Copse, Eau Rouge, 130R) in `frontend/src/components/ChatPanel/PresetPrompts.tsx`
+- [X] T030 [P] [US2] Implement telemetry data loader with 1-meter spatial distance interpolation using `scipy`/`numpy` in `backend/app/agent/tools/telemetry.py` (cites `data-model.md`: `TelemetryLap.Distance`, `TelemetryLap.Speed`, `TelemetryLap.Throttle`, `TelemetryLap.Brake`, `TelemetryLap.nGear`, `TelemetryLap.RPM`, `TelemetryLap.DRS`, `TelemetryLap.X`, `TelemetryLap.Y`, `TelemetryLap.Z`)
+- [X] T031 [P] [US2] Implement dynamic team color resolver querying `fastf1.plotting.get_team_color()` for season with contrast validation against `#0B0F17` in `backend/app/charts/plotly_theme.py` (cites `data-model.md`: `SessionMetadata.team_color`)
+- [X] T032 [US2] Implement corner slicing tool calculating the 5 corner metrics (braking point delta, apex min speed, lowest gear, full-throttle pickup, corner time delta) across ±200m in `backend/app/agent/tools/corner_compare.py` (cites `data-model.md`: Computed Corner Metrics)
+- [X] T033 [US2] Implement multi-panel synchronized Plotly chart builder (Speed, Delta, Throttle, Brake, Gear) and GPS track coordinate builder in `backend/app/charts/telemetry_charts.py`
+- [X] T034 [P] [US2] Implement session and lap metadata extraction (GP name, year, session type, lap number, driver code, compound, weather) in `backend/app/agent/tools/telemetry.py` (cites `data-model.md`: `SessionMetadata.event_name`, `SessionMetadata.year`, `SessionMetadata.session_type`, `SessionMetadata.driver_code`, `SessionMetadata.compound`)
+- [X] T035 [US2] Register corner comparison tool in Google ADK agent with race-engineer commentary prompt grounded in computed metrics in `backend/app/agent/orchestrator.py` and `backend/app/agent/prompts/system.py`
+- [X] T036 [US2] Connect corner comparison tool execution and trace payload emission in `backend/app/chat/router.py` (cites `contracts/api-contracts.md`: `event: trace` with `telemetry_params`)
+- [X] T037 [P] [US2] Implement session metadata bar component in `frontend/src/components/MetadataBar/MetadataBar.tsx`
+- [X] T038 [P] [US2] Implement zoomed GPS track mini-map component colored by faster driver in `frontend/src/components/ChartStage/TrackMiniMap.tsx`
+- [X] T039 [US2] Enhance frontend Plotly chart stage to support synchronized multi-panel telemetry charts and tooltips in `frontend/src/components/ChartStage/PlotlyChart.tsx`
+- [X] T040 [US2] Add preset prompts for famous corners (Copse, Eau Rouge, 130R) in `frontend/src/components/ChatPanel/PresetPrompts.tsx`
 
 **Checkpoint**: User Stories 1 and 2 both work independently. Users can seamlessly transition from historical statistics to deep corner-by-corner telemetry analysis.
 

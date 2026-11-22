@@ -4,9 +4,57 @@ Executes read-only queries against DuckDB views and automatically builds
 dark HUD Plotly charts when applicable.
 """
 
+import re
 from typing import Any, Dict, Optional
 from backend.app.data.duckdb_manager import get_duckdb_manager, validate_sql
 from backend.app.charts.historical_charts import auto_build_historical_chart
+
+
+def _attempt_zero_row_correction(sql: str) -> Optional[str]:
+    """
+    Attempts to rewrite a query that returned 0 rows due to circuit/country aliases.
+    E.g. if the query filters on lower(grand_prix) LIKE '%brazil%', expands to include
+    circuit_country = 'Brazil' or grand_prix LIKE '%São Paulo%'.
+    """
+    sql_lower = sql.lower()
+
+    # Brazil / Interlagos / São Paulo
+    if "brazil" in sql_lower:
+        pattern = r"lower\(grand_prix\)\s+like\s+'%brazil%'"
+        replacement = "(lower(grand_prix) LIKE '%brazil%' OR lower(grand_prix) LIKE '%são paulo%' OR lower(circuit_country) = 'brazil')"
+        corrected = re.sub(pattern, replacement, sql, flags=re.IGNORECASE)
+        if corrected != sql:
+            return corrected
+        pattern2 = r"grand_prix\s*=\s*'Brazilian Grand Prix'"
+        corrected2 = re.sub(pattern2, "(lower(grand_prix) LIKE '%brazil%' OR lower(grand_prix) LIKE '%são paulo%' OR lower(circuit_country) = 'brazil')", sql, flags=re.IGNORECASE)
+        if corrected2 != sql:
+            return corrected2
+
+    # Mexico
+    if "mexico" in sql_lower:
+        pattern = r"lower\(grand_prix\)\s+like\s+'%mexico%'"
+        replacement = "(lower(grand_prix) LIKE '%mexico%' OR lower(circuit_country) = 'mexico')"
+        corrected = re.sub(pattern, replacement, sql, flags=re.IGNORECASE)
+        if corrected != sql:
+            return corrected
+
+    # Britain / UK
+    if "britain" in sql_lower or "british" in sql_lower:
+        pattern = r"lower\(grand_prix\)\s+like\s+'%(?:britain|british)%'"
+        replacement = "(lower(grand_prix) LIKE '%british%' OR lower(circuit_country) IN ('uk', 'united kingdom'))"
+        corrected = re.sub(pattern, replacement, sql, flags=re.IGNORECASE)
+        if corrected != sql:
+            return corrected
+
+    # Italy / Monza / Imola
+    if "italy" in sql_lower or "italian" in sql_lower:
+        pattern = r"lower\(grand_prix\)\s+like\s+'%(?:italy|italian)%'"
+        replacement = "(lower(grand_prix) LIKE '%italian%' OR lower(grand_prix) LIKE '%emilia%' OR lower(circuit_country) = 'italy')"
+        corrected = re.sub(pattern, replacement, sql, flags=re.IGNORECASE)
+        if corrected != sql:
+            return corrected
+
+    return None
 
 
 def query_historical_f1(
@@ -38,6 +86,19 @@ def query_historical_f1(
 
         # Execute query
         result = db.execute_query(sql)
+
+        # Automatic zero-row self-correction for circuit/country aliases
+        if result["row_count"] == 0:
+            corrected_sql = _attempt_zero_row_correction(sql)
+            if corrected_sql and corrected_sql != sql:
+                try:
+                    validate_sql(corrected_sql)
+                    corrected_res = db.execute_query(corrected_sql)
+                    if corrected_res["row_count"] > 0:
+                        result = corrected_res
+                        sql = corrected_sql
+                except Exception:
+                    pass
 
         # Generate Plotly chart if data is suitable
         chart_spec = auto_build_historical_chart(

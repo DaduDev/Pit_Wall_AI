@@ -30,6 +30,8 @@ export interface EngineeringTrace {
     drivers?: string[];
     turn_number?: number;
     corner_nickname?: string;
+    slice_range_m?: number[];
+    apex_distance_m?: number;
   };
   interpolated_points?: number;
   confidence: number;
@@ -40,6 +42,18 @@ export interface PlotlySpec {
   data: any[];
   layout: Record<string, any>;
   config?: Record<string, any>;
+  chart_type?: string;
+  metadata?: {
+    event_name?: string;
+    year?: number;
+    session_type?: string;
+    drivers?: string[];
+    laps?: number[];
+    compounds?: string[];
+    weather?: string;
+    turn_number?: number;
+    corner_nickname?: string;
+  };
 }
 
 export interface SSEStatusEvent {

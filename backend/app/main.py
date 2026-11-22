@@ -10,7 +10,10 @@ from backend.app.config import settings
 from backend.app.auth.router import router as auth_router
 from backend.app.chat.router import router as chat_router
 from backend.app.data.duckdb_manager import get_duckdb_manager
-from backend.app.data.fastf1_cache import init_fastf1_cache
+from backend.app.data.fastf1_cache import configure_headless_fastf1, init_fastf1_cache
+
+# Ensure FastF1 runs in 100% headless mode without interactive terminal prompts
+configure_headless_fastf1()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pitwall.main")
@@ -38,10 +41,10 @@ async def lifespan(app: FastAPI):
             logger.info("Ingesting Kaggle F1 CSVs into DuckDB...")
             ingested = db_mgr.ingest_all_csvs()
             logger.info(f"Ingested {len(ingested)} tables successfully.")
-        
-        # Ensure curated views are created
-        views = db_mgr.create_views()
-        logger.info(f"Verified {len(views)} curated SQL views.")
+            views = db_mgr.create_views()
+            logger.info(f"Verified {len(views)} curated SQL views.")
+        else:
+            logger.info("Verified DuckDB tables and curated SQL views ready in read-only mode.")
     except Exception as e:
         logger.warning(f"DuckDB automatic startup ingestion notice: {e}")
 

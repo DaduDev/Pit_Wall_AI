@@ -82,6 +82,80 @@ def resolve_corner(circuit_key: str, corner_query: Union[str, int]) -> Optional[
     return None
 
 
+GP_CIRCUIT_ALIASES: Dict[str, str] = {
+    "brazil": "interlagos",
+    "brazilian": "interlagos",
+    "brazilian grand prix": "interlagos",
+    "sao paulo": "interlagos",
+    "são paulo": "interlagos",
+    "interlagos": "interlagos",
+    "suzuka": "suzuka",
+    "japan": "suzuka",
+    "japanese": "suzuka",
+    "japanese grand prix": "suzuka",
+    "monza": "monza",
+    "italy": "monza",
+    "italian": "monza",
+    "italian grand prix": "monza",
+    "imola": "imola",
+    "emilia romagna": "imola",
+    "san marino": "imola",
+    "spa": "spa",
+    "belgium": "spa",
+    "belgian": "spa",
+    "belgian grand prix": "spa",
+    "silverstone": "silverstone",
+    "britain": "silverstone",
+    "british": "silverstone",
+    "british grand prix": "silverstone",
+    "monaco": "monaco",
+    "monte carlo": "monaco",
+    "zandvoort": "zandvoort",
+    "dutch": "zandvoort",
+    "netherlands": "zandvoort",
+    "austria": "red_bull_ring",
+    "austrian": "red_bull_ring",
+    "spielberg": "red_bull_ring",
+    "red bull ring": "red_bull_ring",
+    "mexico": "rodriguez",
+    "mexican": "rodriguez",
+    "mexico city": "rodriguez",
+    "cota": "americas",
+    "austin": "americas",
+    "united states": "americas",
+    "canada": "villeneuve",
+    "canadian": "villeneuve",
+    "montreal": "villeneuve",
+    "bahrain": "bahrain",
+    "sakhir": "bahrain",
+    "jeddah": "jeddah",
+    "saudi": "jeddah",
+    "saudi arabia": "jeddah",
+    "abu dhabi": "yas_marina",
+    "yas marina": "yas_marina",
+    "qatar": "losail",
+    "lusail": "losail",
+    "losail": "losail",
+    "singapore": "marina_bay",
+    "marina bay": "marina_bay",
+    "baku": "baku",
+    "azerbaijan": "baku",
+    "melbourne": "albert_park",
+    "australia": "albert_park",
+    "australian": "albert_park",
+    "shanghai": "shanghai",
+    "china": "shanghai",
+    "chinese": "shanghai",
+    "barcelona": "catalunya",
+    "catalunya": "catalunya",
+    "spain": "catalunya",
+    "hungary": "hungaroring",
+    "hungaroring": "hungaroring",
+    "las vegas": "vegas",
+    "miami": "miami",
+}
+
+
 class EntityResolver:
     """
     Fuzzy resolver for Driver and Circuit entities using DuckDB historical records.
@@ -155,10 +229,24 @@ class EntityResolver:
 
     def resolve_circuit(self, query: str) -> Optional[Dict[str, Any]]:
         """
-        Resolves circuit by name, circuitRef, location, or country.
+        Resolves circuit by name, circuitRef, location, country, or canonical Grand Prix alias.
         """
         circuits = self._ensure_circuits_loaded()
         q = query.strip().lower()
+
+        # 0. Canonical GP / Circuit Aliases (e.g. "Brazil", "Interlagos", "Suzuka")
+        alias_target = GP_CIRCUIT_ALIASES.get(q)
+        if not alias_target:
+            # Check if any alias key is contained in query
+            for alias_key, target in GP_CIRCUIT_ALIASES.items():
+                if alias_key in q or q in alias_key:
+                    alias_target = target
+                    break
+
+        if alias_target:
+            for c in circuits:
+                if c["circuitRef"].lower() == alias_target:
+                    return c
 
         # 1. Exact match on circuitRef or name
         for c in circuits:

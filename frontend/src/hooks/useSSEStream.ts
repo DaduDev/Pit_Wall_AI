@@ -6,6 +6,7 @@ interface UseSSEStreamReturn {
   currentStatus: string | null;
   currentTrace: EngineeringTrace | null;
   currentChart: PlotlySpec | null;
+  currentMinimap: PlotlySpec | null;
   isStreaming: boolean;
   sessionId: string | null;
   sendMessage: (text: string) => Promise<void>;
@@ -17,6 +18,7 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
   const [currentStatus, setCurrentStatus] = useState<string | null>(null);
   const [currentTrace, setCurrentTrace] = useState<EngineeringTrace | null>(null);
   const [currentChart, setCurrentChart] = useState<PlotlySpec | null>(null);
+  const [currentMinimap, setCurrentMinimap] = useState<PlotlySpec | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
@@ -99,7 +101,7 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
                   break;
 
                 case 'status':
-                  setCurrentStatus(data.detail || data.step);
+                  setCurrentStatus(data.detail || data.step || data.message);
                   break;
 
                 case 'text':
@@ -134,7 +136,22 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
 
                 case 'chart':
                   if (data.spec) {
-                    setCurrentChart(data.spec);
+                    if (data.chart_type === 'track_minimap') {
+                      setCurrentMinimap({
+                        ...data.spec,
+                        chart_type: data.chart_type,
+                        metadata: data.metadata,
+                      });
+                    } else {
+                      setCurrentChart({
+                        ...data.spec,
+                        chart_type: data.chart_type,
+                        metadata: data.metadata,
+                      });
+                      if (data.chart_type !== 'corner_comparison') {
+                        setCurrentMinimap(null);
+                      }
+                    }
                   }
                   break;
 
@@ -143,7 +160,7 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
                   break;
 
                 case 'error':
-                  setCurrentStatus(`Error: ${data.message}`);
+                  setCurrentStatus(`Error: ${data.message || data.error}`);
                   break;
 
                 case 'done':
@@ -190,6 +207,7 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
     setCurrentStatus(null);
     setCurrentTrace(null);
     setCurrentChart(null);
+    setCurrentMinimap(null);
     setSessionId(null);
   }, []);
 
@@ -198,6 +216,7 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
     currentStatus,
     currentTrace,
     currentChart,
+    currentMinimap,
     isStreaming,
     sessionId,
     sendMessage,

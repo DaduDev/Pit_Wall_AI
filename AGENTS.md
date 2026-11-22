@@ -16,8 +16,8 @@
    - Every number displayed to the user MUST originate from DuckDB SQL queries or deterministic Python/NumPy calculations.
 2. **Data Domain Separation**:
    - Historical Race Data (1950–2024+): DuckDB SQL views (`v_race_results`, `v_qualifying`, `v_pit_stops`, `v_driver_standings`).
-   - Car Telemetry (2018+): FastF1 API with persistent disk cache (`./data/fastf1_cache`) and NumPy 1-meter distance interpolation.
-   - Clear boundary explanation MUST be provided if pre-2018 car telemetry is requested.
+   - Car Telemetry: Free unauthenticated OpenF1 API (2023–present) with persistent disk cache (`./data/openf1_cache`) and NumPy 1-meter distance interpolation (with FastF1 / local fixture fallback for 2018–2022).
+   - Clear boundary explanation MUST be provided if pre-2023 car telemetry is requested without cached data.
 3. **Telemetry HUD Visual Standards**:
    - All charts, panels, and dashboard canvases MUST use the dark HUD background `#0B0F17`.
    - Text contrast MUST meet WCAG AA (4.5:1 minimum).
@@ -39,7 +39,7 @@
 - **Framework**: FastAPI with SSE streaming endpoint at `POST /api/chat/stream`
 - **Orchestration**: Google ADK (`google-adk`) using `gemini-3.5-flash-lite` (primary via `GOOGLE_API_KEY`, `thinking_level="low"`/`"medium"`, no deprecated parameters) with automatic/manual fallback to local Ollama via `LiteLlm(model="ollama_chat/qwen3.5:4b")`, `asyncio.Semaphore(3)` quota guard, and response caching
 - **Historical Data**: DuckDB (`data/f1_data.duckdb`) ingesting Kaggle CSVs (`data/kaggle_csvs/`) with `\N` → `NULL` normalization and curated read-only views
-- **Car Telemetry**: FastF1 with disk cache at `./data/fastf1_cache` + NumPy 1-meter spatial interpolation for corner slicing (±200m around corner reference points)
+- **Car Telemetry**: OpenF1 REST API (2023–present) with disk cache at `./data/openf1_cache` + FastF1/offline fixture fallback + NumPy 1-meter spatial interpolation for corner slicing (±200m around corner reference points)
 - **Entity Resolution**: Fuzzy driver/circuit name matching + `data/corner_nicknames.json`
 - **Visualizations**: Plotly JSON builders (Tier 1 preset figures + Tier 2 restricted Python sandbox for ad-hoc queries)
 - **Authentication**: JWT session tokens; users must sign in; stateless across browser sessions (last 4–6 turns verbatim + rolling summary within a session)
