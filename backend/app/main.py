@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.app.config import settings
 from backend.app.auth.router import router as auth_router
+from backend.app.chat.router import router as chat_router
 from backend.app.data.duckdb_manager import get_duckdb_manager
 from backend.app.data.fastf1_cache import init_fastf1_cache
 
@@ -68,6 +69,7 @@ app.add_middleware(
 
 # Mount Routers
 app.include_router(auth_router)
+app.include_router(chat_router)
 
 
 @app.get("/api/health", tags=["Health"])

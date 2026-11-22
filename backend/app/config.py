@@ -1,5 +1,9 @@
 import os
 from pathlib import Path
+
+# Suppress remote model cost map download in litellm
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 

@@ -6,6 +6,10 @@ Defines the 5 curated read-only DuckDB SQL views for Formula 1 historical data.
 V_RACE_RESULTS_SQL = """
 CREATE OR REPLACE VIEW v_race_results AS
 SELECT
+    r.raceId AS race_id,
+    d.driverId AS driver_id,
+    con.constructorId AS constructor_id,
+    (d.forename || ' ' || d.surname) AS driver_name,
     r.year, r.round, r.name AS grand_prix, r.date AS race_date,
     c.name AS circuit, c.country,
     d.code AS driver_code, d.forename, d.surname, d.nationality AS driver_nationality,
@@ -25,6 +29,9 @@ JOIN status s ON res.statusId = s.statusId;
 V_QUALIFYING_SQL = """
 CREATE OR REPLACE VIEW v_qualifying AS
 SELECT
+    r.raceId AS race_id,
+    d.driverId AS driver_id,
+    (d.forename || ' ' || d.surname) AS driver_name,
     r.year, r.round, r.name AS grand_prix,
     d.code AS driver_code, d.forename, d.surname,
     con.name AS constructor,
@@ -38,6 +45,9 @@ JOIN constructors con ON q.constructorId = con.constructorId;
 V_PIT_STOPS_SQL = """
 CREATE OR REPLACE VIEW v_pit_stops AS
 SELECT
+    r.raceId AS race_id,
+    d.driverId AS driver_id,
+    (d.forename || ' ' || d.surname) AS driver_name,
     r.year, r.round, r.name AS grand_prix,
     d.code AS driver_code, d.surname,
     con.name AS constructor,
@@ -55,6 +65,9 @@ JOIN constructors con ON (
 V_DRIVER_STANDINGS_SQL = """
 CREATE OR REPLACE VIEW v_driver_standings AS
 SELECT
+    r.raceId AS race_id,
+    d.driverId AS driver_id,
+    (d.forename || ' ' || d.surname) AS driver_name,
     r.year, r.round, r.name AS grand_prix,
     d.code AS driver_code, d.forename, d.surname,
     ds.points, ds.position, ds.wins
@@ -66,6 +79,8 @@ JOIN drivers d ON ds.driverId = d.driverId;
 V_CONSTRUCTOR_STANDINGS_SQL = """
 CREATE OR REPLACE VIEW v_constructor_standings AS
 SELECT
+    r.raceId AS race_id,
+    con.constructorId AS constructor_id,
     r.year, r.round, r.name AS grand_prix,
     con.name AS constructor, con.nationality AS constructor_nationality,
     cs.points, cs.position, cs.wins
@@ -86,6 +101,11 @@ def create_curated_views(conn) -> list[str]:
     """Creates the 5 curated views in the provided DuckDB connection."""
     created = []
     for name, sql in ALL_VIEWS_SQL:
-        conn.execute(sql)
+        try:
+            conn.execute(sql)
+        except Exception:
+            # If database is attached in read-only mode, create as TEMP view in-memory
+            temp_sql = sql.replace("CREATE OR REPLACE VIEW", "CREATE OR REPLACE TEMP VIEW")
+            conn.execute(temp_sql)
         created.append(name)
     return created

@@ -86,7 +86,11 @@ class DuckDBManager:
             else:
                 db_file = Path(self.db_path)
                 db_file.parent.mkdir(parents=True, exist_ok=True)
-                self._conn = duckdb.connect(str(db_file))
+                try:
+                    self._conn = duckdb.connect(str(db_file), read_only=False)
+                except duckdb.IOException:
+                    # Fallback to read_only if locked by another active process (e.g. Uvicorn on Windows)
+                    self._conn = duckdb.connect(str(db_file), read_only=True)
         return self._conn
 
     def ingest_all_csvs(self, csv_dir: Optional[Path] = None, force_reload: bool = False) -> Dict[str, int]:

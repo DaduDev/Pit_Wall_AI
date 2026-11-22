@@ -15,6 +15,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  isStreaming?: boolean;
 }
 
 export interface EngineeringTrace {

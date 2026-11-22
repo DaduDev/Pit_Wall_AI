@@ -58,20 +58,20 @@
 
 ### Tests for User Story 1
 
-- [ ] T017 [P] [US1] Create pytest suite for DuckDB ingestion and `\N` to `NULL` normalization in `backend/tests/test_duckdb_ingestion.py`
-- [ ] T018 [P] [US1] Create pytest suite for read-only SQL guardrails and injection rejection in `backend/tests/test_sql_guardrails.py`
-- [ ] T019 [P] [US1] Create integration test for historical query tool execution in `backend/tests/test_historical_tool.py`
+- [X] T017 [P] [US1] Create pytest suite for DuckDB ingestion and `\N` to `NULL` normalization in `backend/tests/test_duckdb_ingestion.py`
+- [X] T018 [P] [US1] Create pytest suite for read-only SQL guardrails and injection rejection in `backend/tests/test_sql_guardrails.py`
+- [X] T019 [P] [US1] Create integration test for historical query tool execution in `backend/tests/test_historical_tool.py`
 
 ### Implementation for User Story 1
 
-- [ ] T020 [P] [US1] Implement DuckDB historical SQL query execution tool with timeout and read-only enforcement in `backend/app/agent/tools/historical_sql.py` (cites `data-model.md`: `races.year`, `results.position`, `v_race_results`, `v_driver_standings`)
-- [ ] T021 [P] [US1] Implement historical chart builders for bar, line, and classification tables with `#0B0F17` theme in `backend/app/charts/historical_charts.py`
-- [ ] T022 [US1] Implement Google ADK orchestrator agent in `backend/app/agent/orchestrator.py` and `backend/app/agent/prompts/system.py`: configure primary `gemini-3.5-flash-lite` (`thinking_level="low"`/`"medium"`, no deprecated parameters), local Ollama fallback via `LiteLlm(model="ollama_chat/qwen3.5:4b")` with context trimmed to last 2 turns, `asyncio.Semaphore(3)` concurrency guard, and response caching for repeated/preset prompts
-- [ ] T023 [US1] Connect SSE streaming chat endpoint `POST /api/chat/stream` for historical Q&A in `backend/app/chat/router.py` (cites `contracts/api-contracts.md`: `POST /api/chat/stream`)
-- [ ] T024 [P] [US1] Implement frontend authentication page and login hook in `frontend/src/components/Auth/LoginPage.tsx` and `frontend/src/hooks/useAuth.ts`
-- [ ] T025 [P] [US1] Implement dark HUD layout shell with left chat panel and right chart stage in `frontend/src/App.tsx`, `frontend/src/styles/globals.css`, and `frontend/src/types/index.ts`
-- [ ] T026 [US1] Implement chat UI with message list and streaming status indicator in `frontend/src/components/ChatPanel/ChatPanel.tsx`, `frontend/src/components/ChatPanel/MessageBubble.tsx`, and `frontend/src/hooks/useSSEStream.ts`
-- [ ] T027 [US1] Implement interactive Plotly stage and collapsible Engineering Trace drawer in `frontend/src/components/ChartStage/ChartStage.tsx`, `frontend/src/components/ChartStage/PlotlyChart.tsx`, and `frontend/src/components/EngineeringTrace/TraceDrawer.tsx`
+- [X] T020 [P] [US1] Implement DuckDB historical SQL query execution tool with timeout and read-only enforcement in `backend/app/agent/tools/historical_sql.py` (cites `data-model.md`: `races.year`, `results.position`, `v_race_results`, `v_driver_standings`)
+- [X] T021 [P] [US1] Implement historical chart builders for bar, line, and classification tables with `#0B0F17` theme in `backend/app/charts/historical_charts.py`
+- [X] T022 [US1] Implement Google ADK orchestrator agent in `backend/app/agent/orchestrator.py` and `backend/app/agent/prompts/system.py`: configure primary `gemini-3.5-flash-lite` (`thinking_level="low"`/`"medium"`, no deprecated parameters), local Ollama fallback via `LiteLlm(model="ollama_chat/qwen3.5:4b")` with context trimmed to last 2 turns, `asyncio.Semaphore(3)` concurrency guard, and response caching for repeated/preset prompts
+- [X] T023 [US1] Connect SSE streaming chat endpoint `POST /api/chat/stream` for historical Q&A in `backend/app/chat/router.py` (cites `contracts/api-contracts.md`: `POST /api/chat/stream`)
+- [X] T024 [P] [US1] Implement frontend authentication page and login hook in `frontend/src/components/Auth/LoginPage.tsx` and `frontend/src/hooks/useAuth.ts`
+- [X] T025 [P] [US1] Implement dark HUD layout shell with left chat panel and right chart stage in `frontend/src/App.tsx`, `frontend/src/styles/globals.css`, and `frontend/src/types/index.ts`
+- [X] T026 [US1] Implement chat UI with message list and streaming status indicator in `frontend/src/components/ChatPanel/ChatPanel.tsx`, `frontend/src/components/ChatPanel/MessageBubble.tsx`, and `frontend/src/hooks/useSSEStream.ts`
+- [X] T027 [US1] Implement interactive Plotly stage and collapsible Engineering Trace drawer in `frontend/src/components/ChartStage/ChartStage.tsx`, `frontend/src/components/ChartStage/PlotlyChart.tsx`, and `frontend/src/components/EngineeringTrace/TraceDrawer.tsx`
 
 **Checkpoint**: User Story 1 is fully functional as an MVP. Users can sign in, submit historical queries, see interactive charts, and inspect SQL traces.
 
