@@ -75,66 +75,127 @@ CIRCUIT_LENGTHS_M = {
 
 # Grand Prix / Circuit aliases for flexible entity resolution
 CIRCUIT_ALIASES = {
+    # Canada / Montreal
+    "canadian": "montreal",
+    "canada": "montreal",
+    "montreal": "montreal",
+    "montréal": "montreal",
+    "villeneuve": "montreal",
+    "circuit gilles villeneuve": "montreal",
+    "gilles villeneuve": "montreal",
+    "gilles-villeneuve": "montreal",
+    # Great Britain / Silverstone
     "british": "silverstone",
     "britain": "silverstone",
     "silverstone": "silverstone",
+    "great britain": "silverstone",
+    "united kingdom": "silverstone",
+    "uk": "silverstone",
+    "england": "silverstone",
+    # Belgium / Spa
     "belgian": "spa-francorchamps",
     "belgium": "spa-francorchamps",
     "spa": "spa-francorchamps",
     "spa-francorchamps": "spa-francorchamps",
+    "francorchamps": "spa-francorchamps",
+    # Italy / Monza
     "italian": "monza",
     "italy": "monza",
     "monza": "monza",
+    "autodromo nazionale di monza": "monza",
+    # Japan / Suzuka
     "japanese": "suzuka",
     "japan": "suzuka",
     "suzuka": "suzuka",
+    # Netherlands / Zandvoort
     "dutch": "zandvoort",
     "netherlands": "zandvoort",
     "zandvoort": "zandvoort",
+    "holland": "zandvoort",
+    # Monaco
     "monaco": "monte carlo",
     "monte carlo": "monte carlo",
+    "monte-carlo": "monte carlo",
+    # Brazil / Interlagos
     "brazilian": "interlagos",
     "brazil": "interlagos",
     "interlagos": "interlagos",
     "sao paulo": "interlagos",
+    "são paulo": "interlagos",
+    "autódromo josé carlos pace": "interlagos",
+    "jose carlos pace": "interlagos",
+    # Austria / Spielberg
     "austrian": "spielberg",
     "austria": "spielberg",
     "spielberg": "spielberg",
     "red bull ring": "spielberg",
+    "red_bull_ring": "spielberg",
+    # Bahrain / Sakhir
     "bahrain": "sakhir",
     "sakhir": "sakhir",
+    # Saudi Arabia / Jeddah
     "saudi": "jeddah",
     "saudi arabia": "jeddah",
+    "saudi arabian": "jeddah",
     "jeddah": "jeddah",
+    # Australia / Melbourne
     "australian": "melbourne",
     "australia": "melbourne",
     "melbourne": "melbourne",
+    "albert park": "melbourne",
+    # Azerbaijan / Baku
     "azerbaijan": "baku",
     "baku": "baku",
+    # Miami
     "miami": "miami",
+    # Emilia Romagna / Imola
     "emilia": "imola",
+    "emilia romagna": "imola",
+    "emilia-romagna": "imola",
     "imola": "imola",
-    "monaco": "monte carlo",
-    "canadian": "montreal",
-    "canada": "montreal",
-    "montreal": "montreal",
+    "san marino": "imola",
+    "enzo e dino ferrari": "imola",
+    # Spain / Catalunya
     "spanish": "catalunya",
     "spain": "catalunya",
     "catalunya": "catalunya",
     "barcelona": "catalunya",
+    "circuit de barcelona-catalunya": "catalunya",
+    # Hungary / Hungaroring
     "hungarian": "hungaroring",
     "hungary": "hungaroring",
     "hungaroring": "hungaroring",
+    "budapest": "hungaroring",
+    # Singapore
     "singapore": "singapore",
+    "marina bay": "singapore",
+    # United States / Austin
     "united states": "austin",
+    "usa": "austin",
+    "us": "austin",
     "cota": "austin",
     "austin": "austin",
+    "circuit of the americas": "austin",
+    # Mexico / Mexico City
     "mexico": "mexico city",
     "mexican": "mexico city",
+    "mexico city": "mexico city",
+    "hermanos rodriguez": "mexico city",
+    "autódromo hermanos rodríguez": "mexico city",
+    "rodriguez": "mexico city",
+    # Las Vegas
     "las vegas": "las vegas",
+    "vegas": "las vegas",
+    # Qatar / Lusail
     "qatar": "lusail",
     "lusail": "lusail",
+    "losail": "lusail",
+    # Abu Dhabi / Yas Marina
     "abu dhabi": "yas marina circuit",
+    "yas marina": "yas marina circuit",
+    "yas marina circuit": "yas marina circuit",
+    "yas island": "yas marina circuit",
+    # China / Shanghai
     "chinese": "shanghai",
     "china": "shanghai",
     "shanghai": "shanghai",
@@ -182,11 +243,14 @@ class OpenF1Client:
         self._request_timestamps: deque = deque()
 
     def _get_cache_path(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Path:
-        """Generates deterministic safe filename for local JSON cache."""
+        """Generates deterministic safe filename for local JSON cache with session key isolation."""
         param_str = ""
+        prefix = endpoint
         if params:
             sorted_items = sorted((str(k), str(v)) for k, v in params.items())
             param_str = "_".join(f"{k}={v}" for k, v in sorted_items)
+            if "session_key" in params:
+                prefix = f"{endpoint}_session_key={params['session_key']}"
 
         # If simple and short, use readable name; otherwise hash
         safe_param_slug = re.sub(r'[^a-zA-Z0-9_\-=]', '_', param_str)
@@ -194,7 +258,11 @@ class OpenF1Client:
             filename = f"{endpoint}_{safe_param_slug}.json" if safe_param_slug else f"{endpoint}.json"
         else:
             h = hashlib.md5(param_str.encode("utf-8")).hexdigest()[:12]
-            filename = f"{endpoint}_{h}.json"
+            # Maintain backward compatibility with existing cached files
+            legacy_file = self.cache_dir / f"{endpoint}_{h}.json"
+            if legacy_file.exists():
+                return legacy_file
+            filename = f"{prefix}_{h}.json"
 
         return self.cache_dir / filename
 
@@ -424,9 +492,10 @@ class OpenF1Client:
         # Normalize target circuit
         clean_gp = grand_prix.lower().strip()
         matched_circuit_key = None
-        for alias, target in CIRCUIT_ALIASES.items():
+        # Sort aliases by length descending so longer phrases match first
+        for alias in sorted(CIRCUIT_ALIASES.keys(), key=len, reverse=True):
             if alias in clean_gp:
-                matched_circuit_key = target
+                matched_circuit_key = CIRCUIT_ALIASES[alias]
                 break
         if not matched_circuit_key:
             matched_circuit_key = clean_gp
@@ -442,15 +511,21 @@ class OpenF1Client:
                 matched_circuit_key in circ
                 or circ in matched_circuit_key
                 or matched_circuit_key in country
+                or country in matched_circuit_key
                 or matched_circuit_key in loc
+                or loc in matched_circuit_key
             ):
                 candidates.append(s)
 
         if not candidates:
-            # Fallback: substring match on raw grand_prix string
+            # Fallback: token match on meaningful non-stop words (ignore generic words like 'circuit', 'autodromo', 'grand', 'prix')
+            stop_words = {"circuit", "autodromo", "autódromo", "international", "grand", "prix", "track", "street", "park", "ring"}
+            words = [w for w in re.split(r'\W+', clean_gp) if len(w) > 3 and w not in stop_words]
             for s in all_sessions:
                 circ = (s.get("circuit_short_name") or "").lower()
-                if any(word in circ for word in clean_gp.split() if len(word) > 3):
+                country = (s.get("country_name") or "").lower()
+                loc = (s.get("location") or "").lower()
+                if any(w in circ or w in country or w in loc for w in words):
                     candidates.append(s)
 
         # Match session type within candidates
@@ -520,7 +595,16 @@ class OpenF1Client:
         if not laps:
             raise ValueError(f"No laps recorded for {driver_code} in OpenF1 session {session_key}")
 
-        valid_laps = [l for l in laps if l.get("lap_duration") is not None and l.get("date_start") is not None]
+        valid_laps = [
+            l for l in laps
+            if l.get("lap_duration") is not None
+            and l.get("date_start") is not None
+            and not l.get("is_pit_out_lap", False)
+        ]
+        if not valid_laps:
+            # Fallback to any timed lap if all were flagged as pit-out
+            valid_laps = [l for l in laps if l.get("lap_duration") is not None and l.get("date_start") is not None]
+
         if not valid_laps:
             raise ValueError(f"No valid timed laps for {driver_code} in OpenF1 session {session_key}")
 
@@ -612,6 +696,7 @@ class OpenF1Client:
                 break
 
         metadata = {
+            "session_key": session_key,
             "event_name": session.get("circuit_short_name", grand_prix),
             "year": year,
             "session_type": session.get("session_name", session_type),
@@ -619,6 +704,12 @@ class OpenF1Client:
             "driver_number": driver_number,
             "lap_number": actual_lap_number,
             "lap_time": lap_duration,
+            "duration_sector_1": target_lap.get("duration_sector_1"),
+            "duration_sector_2": target_lap.get("duration_sector_2"),
+            "duration_sector_3": target_lap.get("duration_sector_3"),
+            "i1_speed": target_lap.get("i1_speed"),
+            "i2_speed": target_lap.get("i2_speed"),
+            "st_speed": target_lap.get("st_speed"),
             "compound": compound,
             "team": team_name,
             "team_color": team_color,

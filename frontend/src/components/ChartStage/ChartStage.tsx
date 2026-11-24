@@ -2,6 +2,7 @@ import { Activity, BarChart2 } from 'lucide-react';
 import { PlotlySpec, EngineeringTrace } from '../../types';
 import { PlotlyChart } from './PlotlyChart';
 import { TrackMiniMap } from './TrackMiniMap';
+import { SectorSummaryBar } from './SectorSummaryBar';
 import { MetadataBar } from '../MetadataBar/MetadataBar';
 import { TraceDrawer } from '../EngineeringTrace/TraceDrawer';
 
@@ -12,7 +13,10 @@ interface ChartStageProps {
 }
 
 export function ChartStage({ chart, minimap, trace }: ChartStageProps) {
-  const isTelemetry = chart?.chart_type === 'corner_comparison' || Boolean(minimap);
+  const isTelemetry =
+    chart?.chart_type === 'corner_comparison' ||
+    chart?.chart_type === 'full_lap_comparison' ||
+    Boolean(minimap);
 
   return (
     <div className="flex h-full flex-col bg-[#0B0F17] p-4 overflow-y-auto space-y-3">
@@ -31,6 +35,9 @@ export function ChartStage({ chart, minimap, trace }: ChartStageProps) {
 
       {/* Metadata Bar for Telemetry Sessions */}
       {isTelemetry && <MetadataBar chart={chart} minimap={minimap || null} />}
+
+      {/* Sector & Speed Trap Summary Bar for Full-Lap Overlays */}
+      {chart?.chart_type === 'full_lap_comparison' && <SectorSummaryBar chart={chart} />}
 
       {/* Main visualization container */}
       <div className="flex-1 min-h-[420px]">

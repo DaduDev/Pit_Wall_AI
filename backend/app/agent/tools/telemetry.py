@@ -11,13 +11,16 @@ Implements:
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from backend.app.config import settings
+from backend.app.data.entity_resolver import EntityResolver
 from backend.app.data.fastf1_cache import init_fastf1_cache, load_session_with_retry
 from backend.app.data.openf1_client import get_openf1_client
+from backend.app.charts.telemetry_charts import build_full_lap_comparison_figure
 
 logger = logging.getLogger(__name__)
 
@@ -227,3 +230,247 @@ def load_driver_lap(
         raise RuntimeError(
             f"Unable to load OpenF1 telemetry for {code_upper} in {year} {grand_prix}: {o1_err}"
         )
+
+
+def compare_full_lap_telemetry(
+    year: int,
+    grand_prix: Optional[str] = None,
+    driver1: Optional[str] = None,
+    driver2: Optional[str] = None,
+    session_type: str = "Q",
+    lap_number_1: Optional[int] = None,
+    lap_number_2: Optional[int] = None,
+    circuit: Optional[str] = None,
+    driver_a: Optional[str] = None,
+    driver_b: Optional[str] = None,
+    session: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Coarse-grained ADK tool for broadcast-grade full-lap telemetry overlay comparison.
+    1. Resolves drivers and circuit entities
+    2. Loads aligned laps for both drivers via OpenF1 (ignoring pit-out laps)
+    3. Normalizes and interpolates both laps onto a common 5-meter spatial grid
+    4. Computes cumulative delta trace starting at 0.000s and matching official lap_duration delta at finish
+    5. Computes structured sector deltas, speed trap speeds, full-throttle %, and braking %
+    6. Builds synchronized 4-panel Plotly figure and Engineering Trace
+    """
+    t_start = time.perf_counter()
+
+    resolved_gp = grand_prix or circuit
+    if not resolved_gp:
+        raise ValueError("grand_prix or circuit must be specified.")
+    resolved_d1 = driver1 or driver_a
+    resolved_d2 = driver2 or driver_b
+    if not resolved_d1 or not resolved_d2:
+        raise ValueError("Both drivers must be specified.")
+    resolved_session = session or session_type
+
+    # 1. Enforce strict 2023 era boundary
+    if year < 2023:
+        raise ValueError(
+            f"Car sensor telemetry (ECU speed, throttle, brake, gear) is digitally available for 2023–present via the OpenF1 REST API. "
+            f"For the {year} {resolved_gp}, car sensor telemetry is not available, but lap-by-lap pace, sector times, and finishing classifications are fully accessible in Historical Analytics via DuckDB."
+        )
+
+    # 2. Resolve Driver and Circuit Entities
+    resolver = EntityResolver()
+    res_d1 = resolver.resolve_driver(resolved_d1)
+    res_d2 = resolver.resolve_driver(resolved_d2)
+    res_circ = resolver.resolve_circuit(resolved_gp)
+
+    code_1 = res_d1["code"] if res_d1 and res_d1.get("code") else resolved_d1.upper()
+    code_2 = res_d2["code"] if res_d2 and res_d2.get("code") else resolved_d2.upper()
+    clean_gp = res_circ["name"] if res_circ and res_circ.get("name") else resolved_gp
+
+    # 3. Load full-lap telemetry for both drivers
+    try:
+        lap_a = load_driver_lap(
+            year=year,
+            grand_prix=clean_gp,
+            driver_code=code_1,
+            session_type=resolved_session,
+            lap_number=lap_number_1,
+        )
+    except Exception as e:
+        raise ValueError(f"Unable to load full-lap telemetry for {code_1} at {year} {clean_gp}: {str(e)}")
+
+    try:
+        lap_b = load_driver_lap(
+            year=year,
+            grand_prix=clean_gp,
+            driver_code=code_2,
+            session_type=resolved_session,
+            lap_number=lap_number_2,
+        )
+    except Exception as e:
+        raise ValueError(f"Unable to load full-lap telemetry for {code_2} at {year} {clean_gp}: {str(e)}")
+
+    df_a = lap_a["telemetry"]
+    df_b = lap_b["telemetry"]
+    meta_a = lap_a["metadata"]
+    meta_b = lap_b["metadata"]
+
+    if df_a.empty or df_b.empty:
+        raise ValueError("Telemetry data is empty for one or both requested laps.")
+
+    # 4. Define Common 5-Meter Distance Grid
+    circuit_length = max(float(df_a["Distance"].max()), float(df_b["Distance"].max()))
+    if circuit_length <= 0:
+        circuit_length = 5000.0
+
+    # Scale distances so both span [0.0, circuit_length]
+    if df_a["Distance"].max() > 0:
+        df_a = df_a.copy()
+        df_a["Distance"] = df_a["Distance"] * (circuit_length / df_a["Distance"].max())
+    if df_b["Distance"].max() > 0:
+        df_b = df_b.copy()
+        df_b["Distance"] = df_b["Distance"] * (circuit_length / df_b["Distance"].max())
+
+    grid = np.arange(0.0, circuit_length + 5.0, 5.0)
+    interp_a = interpolate_to_distance_grid(df_a, grid)
+    interp_b = interpolate_to_distance_grid(df_b, grid)
+
+    # 5. Compute Cumulative Delta Trace
+    time_a_official = float(meta_a.get("lap_time", 0.0))
+    time_b_official = float(meta_b.get("lap_time", 0.0))
+    delta_official = round(time_b_official - time_a_official, 3)
+
+    raw_delta = interp_b["Time"] - interp_a["Time"]
+    raw_delta = raw_delta - raw_delta[0]  # Zeroed at start/finish line
+
+    drift = delta_official - raw_delta[-1]
+    delta_trace = np.round(raw_delta + drift * (grid / circuit_length), 3)
+    delta_trace[0] = 0.000
+    delta_trace[-1] = delta_official
+
+    # 6. Locate Sector Boundaries on Distance Axis
+    s1_dur_a = float(meta_a.get("duration_sector_1") or (time_a_official / 3.0))
+    s2_dur_a = float(meta_a.get("duration_sector_2") or (time_a_official / 3.0))
+    s1_dur_b = float(meta_b.get("duration_sector_1") or (time_b_official / 3.0))
+    s2_dur_b = float(meta_b.get("duration_sector_2") or (time_b_official / 3.0))
+
+    idx_s1_a = np.where(interp_a["Time"] >= s1_dur_a)[0]
+    d_s1_a = float(grid[idx_s1_a[0]]) if len(idx_s1_a) > 0 else circuit_length * 0.33
+    idx_s2_a = np.where(interp_a["Time"] >= (s1_dur_a + s2_dur_a))[0]
+    d_s2_a = float(grid[idx_s2_a[0]]) if len(idx_s2_a) > 0 else circuit_length * 0.66
+
+    idx_s1_b = np.where(interp_b["Time"] >= s1_dur_b)[0]
+    d_s1_b = float(grid[idx_s1_b[0]]) if len(idx_s1_b) > 0 else circuit_length * 0.33
+    idx_s2_b = np.where(interp_b["Time"] >= (s1_dur_b + s2_dur_b))[0]
+    d_s2_b = float(grid[idx_s2_b[0]]) if len(idx_s2_b) > 0 else circuit_length * 0.66
+
+    s1_dist = round(float((d_s1_a + d_s1_b) / 2.0), 1)
+    s2_dist = round(float((d_s2_a + d_s2_b) / 2.0), 1)
+
+    # 7. Compute Structured Metrics
+    s1_delta = round(float(s1_dur_b - s1_dur_a), 3)
+    s2_delta = round(float(s2_dur_b - s2_dur_a), 3)
+    s3_dur_a = float(meta_a.get("duration_sector_3") or (time_a_official - s1_dur_a - s2_dur_a))
+    s3_dur_b = float(meta_b.get("duration_sector_3") or (time_b_official - s1_dur_b - s2_dur_b))
+    s3_delta = round(float(s3_dur_b - s3_dur_a), 3)
+
+    st_a = float(meta_a.get("st_speed") or np.max(interp_a["Speed"]))
+    st_b = float(meta_b.get("st_speed") or np.max(interp_b["Speed"]))
+    st_delta = round(float(st_b - st_a), 1)
+
+    full_thr_a = round(float(np.mean(interp_a["Throttle"] >= 98.0) * 100.0), 1)
+    full_thr_b = round(float(np.mean(interp_b["Throttle"] >= 98.0) * 100.0), 1)
+
+    brk_a = round(float(np.mean(interp_a["Brake"] >= 10.0) * 100.0), 1)
+    brk_b = round(float(np.mean(interp_b["Brake"] >= 10.0) * 100.0), 1)
+
+    metrics = {
+        "lap_times": {
+            "driver_a": time_a_official,
+            "driver_b": time_b_official,
+            "delta_s": delta_official,
+            "faster": code_1 if delta_official > 0 else code_2,
+        },
+        "sectors": {
+            "sector_1": {
+                "driver_a": round(float(s1_dur_a), 3),
+                "driver_b": round(float(s1_dur_b), 3),
+                "delta_s": s1_delta,
+                "faster": code_1 if s1_delta > 0 else code_2,
+                "boundary_m": s1_dist,
+            },
+            "sector_2": {
+                "driver_a": round(float(s2_dur_a), 3),
+                "driver_b": round(float(s2_dur_b), 3),
+                "delta_s": s2_delta,
+                "faster": code_1 if s2_delta > 0 else code_2,
+                "boundary_m": s2_dist,
+            },
+            "sector_3": {
+                "driver_a": round(float(s3_dur_a), 3),
+                "driver_b": round(float(s3_dur_b), 3),
+                "delta_s": s3_delta,
+                "faster": code_1 if s3_delta > 0 else code_2,
+            },
+        },
+        "speed_trap": {
+            "driver_a": round(float(st_a), 1),
+            "driver_b": round(float(st_b), 1),
+            "delta_kph": st_delta,
+            "max_speed_a": round(float(np.max(interp_a["Speed"])), 1),
+            "max_speed_b": round(float(np.max(interp_b["Speed"])), 1),
+        },
+        "full_throttle_pct": {
+            "driver_a": full_thr_a,
+            "driver_b": full_thr_b,
+            "delta": round(full_thr_b - full_thr_a, 1),
+        },
+        "braking_pct": {
+            "driver_a": brk_a,
+            "driver_b": brk_b,
+            "delta": round(brk_b - brk_a, 1),
+        },
+    }
+
+    # 8. Build Plotly Chart Spec
+    chart_spec = build_full_lap_comparison_figure(
+        grid_distance=grid,
+        data_a=interp_a,
+        data_b=interp_b,
+        delta_trace=delta_trace,
+        meta_a=meta_a,
+        meta_b=meta_b,
+        sector_boundaries=(s1_dist, s2_dist),
+        metrics=metrics,
+    )
+
+    # 9. Build Engineering Trace
+    trace = {
+        "data_domain": "telemetry",
+        "execution_time_ms": round((time.perf_counter() - t_start) * 1000, 2),
+        "confidence": 1.0,
+        "telemetry_params": {
+            "year": year,
+            "grand_prix": clean_gp,
+            "session_type": resolved_session,
+            "session_key": meta_a.get("session_key"),
+            "drivers": [code_1, code_2],
+            "driver_numbers": {code_1: meta_a.get("driver_number"), code_2: meta_b.get("driver_number")},
+            "lap_numbers": {code_1: meta_a.get("lap_number"), code_2: meta_b.get("lap_number")},
+            "sector_boundaries_m": [s1_dist, s2_dist],
+            "circuit_length_m": round(float(circuit_length), 1),
+            "grid_resolution_m": 5.0,
+        },
+        "interpolated_points": len(grid),
+        "notes": f"Full-lap telemetry from OpenF1 ({meta_a.get('session_key')}) aligned across {len(grid)} points at 5m resolution.",
+    }
+
+    return {
+        "metrics": metrics,
+        "metadata": {
+            "driver_a": meta_a,
+            "driver_b": meta_b,
+            "sector_boundaries": [s1_dist, s2_dist],
+        },
+        "chart": {
+            "chart_type": "full_lap_comparison",
+            "spec": chart_spec,
+            "caption": f"Full-Lap Telemetry: {code_1} vs {code_2} ({year} {clean_gp})",
+        },
+        "trace": trace,
+    }

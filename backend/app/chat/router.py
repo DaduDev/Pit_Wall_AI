@@ -4,12 +4,17 @@ Implements POST /api/chat/stream delivering SSE events
 for historical Q&A and telemetry analysis.
 """
 
+import time
 from typing import Optional
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from backend.app.chat.session import session_manager
-from backend.app.chat.streaming import format_session_event, format_error_event
+from backend.app.chat.streaming import (
+    format_session_event,
+    format_error_event,
+    format_done_event,
+)
 from backend.app.agent.orchestrator import RaceEngineerOrchestrator
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
@@ -31,6 +36,8 @@ async def chat_stream(body: ChatStreamRequest, request: Request):
     session = session_manager.get_or_create(session_id=body.session_id)
 
     async def event_generator():
+        t_start = time.perf_counter()
+        emitted_done = False
         try:
             # Emit session event first
             yield format_session_event(session.session_id)
@@ -42,6 +49,8 @@ async def chat_stream(body: ChatStreamRequest, request: Request):
             ):
                 if await request.is_disconnected():
                     break
+                if "event: done" in chunk:
+                    emitted_done = True
                 yield chunk
         except Exception as e:
             yield format_error_event(
@@ -49,6 +58,10 @@ async def chat_stream(body: ChatStreamRequest, request: Request):
                 message=f"Stream encountered unexpected error: {str(e)}",
                 retryable=True,
             )
+        finally:
+            if not emitted_done:
+                elapsed_ms = int((time.perf_counter() - t_start) * 1000)
+                yield format_done_event(total_duration_ms=elapsed_ms)
 
     return StreamingResponse(
         event_generator(),

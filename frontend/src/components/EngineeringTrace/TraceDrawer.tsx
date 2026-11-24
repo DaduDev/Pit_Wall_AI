@@ -14,9 +14,13 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
     return null;
   }
 
+  const isTelemetry = trace.data_domain === 'telemetry' || !!trace.telemetry_params;
+  const params = trace.telemetry_params;
+
   const handleCopy = () => {
-    if (trace.query) {
-      navigator.clipboard.writeText(trace.query);
+    const textToCopy = trace.query || (params ? JSON.stringify(params, null, 2) : '');
+    if (textToCopy) {
+      navigator.clipboard.writeText(textToCopy);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -57,7 +61,9 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
               <span className="text-white font-medium">{trace.data_domain}</span>
             </div>
             <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
-              <span className="text-[10px] text-[#64748B] block">ROW COUNT</span>
+              <span className="text-[10px] text-[#64748B] block">
+                {isTelemetry ? 'SAMPLES / ROWS' : 'ROW COUNT'}
+              </span>
               <span className="text-white font-medium">{trace.row_count ?? 'N/A'}</span>
             </div>
             <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
@@ -65,13 +71,51 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
               <span className="text-emerald-400 font-medium">{(trace.confidence * 100).toFixed(0)}%</span>
             </div>
             <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
-              <span className="text-[10px] text-[#64748B] block">DATABASE</span>
-              <span className="text-white font-medium">DuckDB Read-Only</span>
+              <span className="text-[10px] text-[#64748B] block">PROVIDER</span>
+              <span className="text-white font-medium">
+                {isTelemetry ? 'OpenF1 REST API' : 'DuckDB Read-Only'}
+              </span>
             </div>
           </div>
 
-          {/* Exact SQL Query */}
-          {trace.query && (
+          {/* Telemetry provenance badges */}
+          {params && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-[#1E293B]/60">
+              {params.session_key && (
+                <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
+                  <span className="text-[10px] text-[#64748B] block">SESSION KEY</span>
+                  <span className="text-cyan-400 font-medium">#{params.session_key}</span>
+                </div>
+              )}
+              {params.interpolation_method && (
+                <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
+                  <span className="text-[10px] text-[#64748B] block">INTERPOLATION</span>
+                  <span className="text-[#E2E8F0] font-medium">{params.interpolation_method}</span>
+                </div>
+              )}
+              {params.lap_numbers && (
+                <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
+                  <span className="text-[10px] text-[#64748B] block">DRIVER LAPS</span>
+                  <span className="text-emerald-400 font-medium">
+                    {Array.isArray(params.lap_numbers)
+                      ? params.lap_numbers.join(' | ')
+                      : Object.entries(params.lap_numbers).map(([d, l]) => `${d}: L${l}`).join(' | ')}
+                  </span>
+                </div>
+              )}
+              {params.sector_boundaries_m && (
+                <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
+                  <span className="text-[10px] text-[#64748B] block">SECTORS</span>
+                  <span className="text-amber-400 font-medium">
+                    S1: {Math.round(params.sector_boundaries_m[0])}m | S2: {Math.round(params.sector_boundaries_m[1])}m
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Exact SQL Query or Telemetry Parameters */}
+          {trace.query ? (
             <div>
               <div className="flex items-center justify-between pb-1 text-[#94A3B8]">
                 <span className="text-[10px] uppercase tracking-wider text-[#64748B]">
@@ -89,7 +133,25 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
                 {trace.query}
               </pre>
             </div>
-          )}
+          ) : params ? (
+            <div>
+              <div className="flex items-center justify-between pb-1 text-[#94A3B8]">
+                <span className="text-[10px] uppercase tracking-wider text-[#64748B]">
+                  Ground-Truth Telemetry Trace Parameters:
+                </span>
+                <button
+                  onClick={handleCopy}
+                  className="flex items-center space-x-1 text-[11px] hover:text-white transition-colors"
+                >
+                  {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                  <span>{copied ? 'Copied' : 'Copy Parameters'}</span>
+                </button>
+              </div>
+              <pre className="overflow-x-auto rounded bg-[#0B0F17] p-3 text-[11px] text-cyan-300 border border-[#1E293B] leading-relaxed whitespace-pre-wrap">
+                {JSON.stringify(params, null, 2)}
+              </pre>
+            </div>
+          ) : null}
 
           {trace.notes && (
             <p className="text-[11px] text-[#94A3B8] italic">

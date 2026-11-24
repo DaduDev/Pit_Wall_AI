@@ -8,7 +8,7 @@ Implements:
 - Dark HUD styling (#0B0F17) with teammate collision resolution
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -416,3 +416,306 @@ def build_corner_minimap_figure(
     )
 
     return fig.to_plotly_json()
+
+
+def build_full_lap_comparison_figure(
+    grid_distance: np.ndarray,
+    data_a: Dict[str, np.ndarray],
+    data_b: Dict[str, np.ndarray],
+    delta_trace: np.ndarray,
+    meta_a: Dict[str, Any],
+    meta_b: Dict[str, Any],
+    sector_boundaries: Tuple[float, float],
+    metrics: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Builds a broadcast-grade 4-panel synchronized full-lap Plotly figure:
+    - Row 1: Speed (km/h) with vertical dashed Sector 1 / Sector 2 boundaries and labels
+    - Row 2: Cumulative Time Delta (s) (Delta: Driver B vs Driver A, zeroed at start line)
+    - Row 3: Throttle (%) & Brake (%)
+    - Row 4: Gear (1–8) with step shape
+    Dark HUD theme (#0B0F17) with team colors and teammate collision resolution.
+    """
+    driver_a = meta_a["driver_code"]
+    driver_b = meta_b["driver_code"]
+    color_a = meta_a.get("team_color", "#38BDF8")
+    color_b = meta_b.get("team_color", "#E80020")
+
+    style_a, style_b = get_driver_trace_styles(color_a, color_b)
+
+    s1_dist, s2_dist = sector_boundaries
+    circuit_length = float(grid_distance[-1])
+
+    time_a = meta_a.get("lap_time", 0.0)
+    time_b = meta_b.get("lap_time", 0.0)
+    delta_final = round(time_b - time_a, 3)
+    faster = driver_a if delta_final > 0 else driver_b
+    delta_abs = abs(delta_final)
+
+    def _fmt_lap(s: float) -> str:
+        if s <= 0:
+            return "0:00.000"
+        m = int(s // 60)
+        sec = s % 60
+        return f"{m}:{sec:06.3f}"
+
+    fig = make_subplots(
+        rows=4,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.035,
+        row_heights=[0.38, 0.22, 0.22, 0.18],
+        subplot_titles=(
+            "Speed (km/h)",
+            f"Cumulative Delta: {driver_b} vs {driver_a} (s)",
+            "Throttle (%) & Brake (%)",
+            "Gear",
+        ),
+    )
+
+    x_vals = grid_distance.tolist()
+
+    # 1. Speed (Row 1)
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=data_a["Speed"].tolist(),
+            name=f"{driver_a} ({_fmt_lap(time_a)})",
+            line=dict(color=style_a["color"], width=style_a["width"], dash=style_a["dash"]),
+            hovertemplate=f"{driver_a}: %{{y:.1f}} km/h<extra></extra>",
+            showlegend=True,
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=data_b["Speed"].tolist(),
+            name=f"{driver_b} ({_fmt_lap(time_b)})",
+            line=dict(color=style_b["color"], width=style_b["width"], dash=style_b["dash"]),
+            hovertemplate=f"{driver_b}: %{{y:.1f}} km/h<extra></extra>",
+            showlegend=True,
+        ),
+        row=1,
+        col=1,
+    )
+
+    # 2. Cumulative Delta (Row 2)
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=delta_trace.tolist(),
+            name="Cumulative Delta",
+            line=dict(color="#38BDF8", width=2.0),
+            hovertemplate="Delta: %{y:+.3f}s<extra></extra>",
+            showlegend=False,
+        ),
+        row=2,
+        col=1,
+    )
+
+    # 3. Throttle & Brake (Row 3)
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=data_a["Throttle"].tolist(),
+            name=f"{driver_a} Throttle",
+            line=dict(color=style_a["color"], width=1.5, dash=style_a["dash"]),
+            hovertemplate=f"{driver_a} Thr: %{{y:.0f}}%<extra></extra>",
+            showlegend=False,
+        ),
+        row=3,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=data_b["Throttle"].tolist(),
+            name=f"{driver_b} Throttle",
+            line=dict(color=style_b["color"], width=1.5, dash=style_b["dash"]),
+            hovertemplate=f"{driver_b} Thr: %{{y:.0f}}%<extra></extra>",
+            showlegend=False,
+        ),
+        row=3,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=data_a["Brake"].tolist(),
+            name=f"{driver_a} Brake",
+            line=dict(color="#EF4444", width=1.2),
+            hovertemplate=f"{driver_a} Brk: %{{y:.0f}}%<extra></extra>",
+            showlegend=False,
+        ),
+        row=3,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=data_b["Brake"].tolist(),
+            name=f"{driver_b} Brake",
+            line=dict(color="#F59E0B", width=1.2, dash="dot"),
+            hovertemplate=f"{driver_b} Brk: %{{y:.0f}}%<extra></extra>",
+            showlegend=False,
+        ),
+        row=3,
+        col=1,
+    )
+
+    # 4. Gear (Row 4)
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=data_a["nGear"].tolist(),
+            name=f"{driver_a} Gear",
+            line=dict(color=style_a["color"], width=1.8, shape="hv", dash=style_a["dash"]),
+            hovertemplate=f"{driver_a} Gear: %{{y}}<extra></extra>",
+            showlegend=False,
+        ),
+        row=4,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=data_b["nGear"].tolist(),
+            name=f"{driver_b} Gear",
+            line=dict(color=style_b["color"], width=1.8, shape="hv", dash=style_b["dash"]),
+            hovertemplate=f"{driver_b} Gear: %{{y}}<extra></extra>",
+            showlegend=False,
+        ),
+        row=4,
+        col=1,
+    )
+
+    # Sector Boundaries across all 4 rows
+    for r in range(1, 5):
+        fig.add_vline(
+            x=s1_dist,
+            line_width=1,
+            line_dash="dash",
+            line_color="#64748B",
+            row=r,
+            col=1,
+        )
+        fig.add_vline(
+            x=s2_dist,
+            line_width=1,
+            line_dash="dash",
+            line_color="#64748B",
+            row=r,
+            col=1,
+        )
+
+    # Sector text banners in Row 1
+    fig.add_annotation(
+        x=s1_dist / 2.0,
+        y=1.02,
+        yref="y domain",
+        text="<b>SECTOR 1</b>",
+        showarrow=False,
+        font=dict(color="#94A3B8", size=10, family="monospace"),
+    )
+    fig.add_annotation(
+        x=(s1_dist + s2_dist) / 2.0,
+        y=1.02,
+        yref="y domain",
+        text="<b>SECTOR 2</b>",
+        showarrow=False,
+        font=dict(color="#94A3B8", size=10, family="monospace"),
+    )
+    fig.add_annotation(
+        x=(s2_dist + circuit_length) / 2.0,
+        y=1.02,
+        yref="y domain",
+        text="<b>SECTOR 3</b>",
+        showarrow=False,
+        font=dict(color="#94A3B8", size=10, family="monospace"),
+    )
+
+    # Layout styling with Dark HUD theme
+    event_title = meta_a.get("event_name", "Grand Prix")
+    year_str = meta_a.get("year", 2024)
+    session_title = meta_a.get("session_type", "Qualifying")
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor=HUD_BG_COLOR,
+        plot_bgcolor=HUD_BG_COLOR,
+        title=dict(
+            text=(
+                f"<b>Full-Lap Telemetry — {year_str} {event_title} ({session_title})</b><br>"
+                f"<span style='font-size:11px;color:{HUD_TEXT_MUTED}'>"
+                f"{driver_a} ({_fmt_lap(time_a)}) vs {driver_b} ({_fmt_lap(time_b)}) • "
+                f"Delta: {faster} -{delta_abs:.3f}s • 5m Aligned Spatial Grid"
+                f"</span>"
+            ),
+            x=0.02,
+            y=0.98,
+            xanchor="left",
+            yanchor="top",
+            font=dict(color=HUD_TEXT_BRIGHT, size=14),
+        ),
+        margin=dict(l=55, r=25, t=75, b=45),
+        height=620,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.03,
+            xanchor="right",
+            x=0.98,
+            bgcolor="rgba(18, 24, 36, 0.9)",
+            bordercolor=HUD_BORDER_COLOR,
+            borderwidth=1,
+            font=dict(color=HUD_TEXT_BRIGHT, size=11),
+        ),
+    )
+
+    # Configure axes
+    for i in range(1, 5):
+        fig.update_xaxes(
+            gridcolor=HUD_GRID_COLOR,
+            linecolor=HUD_BORDER_COLOR,
+            tickfont=dict(color=HUD_TEXT_MUTED, size=9),
+            zeroline=False,
+            row=i,
+            col=1,
+        )
+        fig.update_yaxes(
+            gridcolor=HUD_GRID_COLOR,
+            linecolor=HUD_BORDER_COLOR,
+            tickfont=dict(color=HUD_TEXT_MUTED, size=9),
+            row=i,
+            col=1,
+        )
+
+    fig.update_xaxes(
+        title_text="Lap Distance (m)",
+        title_font=dict(color=HUD_TEXT_NORMAL, size=10),
+        row=4,
+        col=1,
+    )
+    fig.update_yaxes(zeroline=True, zerolinecolor=HUD_ZERO_LINE_COLOR, zerolinewidth=1.5, row=2, col=1)
+    fig.update_yaxes(range=[-5, 105], row=3, col=1)
+    fig.update_yaxes(range=[0.5, 8.5], dtick=1, row=4, col=1)
+
+    spec = fig.to_plotly_json()
+    spec["chart_type"] = "full_lap_comparison"
+    spec["metadata"] = {
+        "event_name": event_title,
+        "year": year_str,
+        "session_type": session_title,
+        "drivers": [driver_a, driver_b],
+        "driver_numbers": [meta_a.get("driver_number"), meta_b.get("driver_number")],
+        "laps": [meta_a.get("lap_number"), meta_b.get("lap_number")],
+        "lap_times": [time_a, time_b],
+        "compounds": [meta_a.get("compound", "SOFT"), meta_b.get("compound", "SOFT")],
+        "sector_boundaries_m": [s1_dist, s2_dist],
+        "metrics": metrics or {},
+    }
+
+    return spec

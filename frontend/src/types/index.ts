@@ -27,11 +27,18 @@ export interface EngineeringTrace {
     year?: number;
     grand_prix?: string;
     session_type?: string;
+    session_key?: number;
     drivers?: string[];
+    driver_numbers?: (number | string)[] | Record<string, number | string>;
+    lap_numbers?: (number | string)[] | Record<string, number | string>;
     turn_number?: number;
     corner_nickname?: string;
     slice_range_m?: number[];
     apex_distance_m?: number;
+    sector_boundaries_m?: number[];
+    circuit_length_m?: number;
+    grid_resolution_m?: number;
+    interpolation_method?: string;
   };
   interpolated_points?: number;
   confidence: number;
@@ -48,11 +55,15 @@ export interface PlotlySpec {
     year?: number;
     session_type?: string;
     drivers?: string[];
+    driver_numbers?: (number | string)[];
     laps?: number[];
+    lap_times?: number[];
     compounds?: string[];
     weather?: string;
     turn_number?: number;
     corner_nickname?: string;
+    sector_boundaries_m?: number[];
+    metrics?: any;
   };
 }
 

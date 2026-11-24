@@ -107,6 +107,8 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
                 case 'text':
                   if (data.delta) {
                     accumulatedText += data.delta;
+                    // Clear the status pill as soon as the first text chunk arrives
+                    setCurrentStatus(null);
                     setMessages((prev) => {
                       const existing = prev.find((m) => m.id === assistantMsgId);
                       if (existing) {

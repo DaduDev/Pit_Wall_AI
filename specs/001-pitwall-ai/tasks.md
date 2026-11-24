@@ -114,17 +114,17 @@
 
 ### Tests for User Story 3
 
-- [ ] T041 [P] [US3] Create integration test for full-lap telemetry alignment and speed delta computation in `backend/tests/test_full_lap.py`
+- [X] T041 [P] [US3] Create integration test for full-lap telemetry alignment and speed delta computation in `backend/tests/test_full_lap.py`
 
 ### Implementation for User Story 3
 
-- [ ] T042 [P] [US3] Implement full-lap telemetry extraction tool in `backend/app/agent/tools/telemetry.py` (cites `data-model.md`: `TelemetryLap.Speed`, `TelemetryLap.Distance`, `SessionMetadata.lap_time`)
-- [ ] T043 [US3] Implement full-lap Plotly chart builder with speed overlay, delta trace, and gear application in `backend/app/charts/telemetry_charts.py`
-- [ ] T044 [US3] Register full-lap overlay tool in Google ADK orchestrator in `backend/app/agent/orchestrator.py`
-- [ ] T045 [US3] Add missing-lap error handling for drivers without valid timed laps in `backend/app/agent/tools/telemetry.py`
-- [ ] T046 [US3] Wire full-lap chart and trace event emission through `POST /api/chat/stream` in `backend/app/chat/router.py`
-- [ ] T047 [P] [US3] Update frontend `frontend/src/components/ChartStage/PlotlyChart.tsx` to handle full-lap multi-channel zoom and pan interactions
-- [ ] T048 [P] [US3] Add full-lap comparison preset prompts in `frontend/src/components/ChatPanel/PresetPrompts.tsx`
+- [X] T042 [P] [US3] Implement full-lap telemetry extraction tool in `backend/app/agent/tools/telemetry.py` (cites `data-model.md`: `TelemetryLap.Speed`, `TelemetryLap.Distance`, `SessionMetadata.lap_time`)
+- [X] T043 [US3] Implement full-lap Plotly chart builder with speed overlay, delta trace, and gear application in `backend/app/charts/telemetry_charts.py`
+- [X] T044 [US3] Register full-lap overlay tool in Google ADK orchestrator in `backend/app/agent/orchestrator.py`
+- [X] T045 [US3] Add missing-lap error handling for drivers without valid timed laps in `backend/app/agent/tools/telemetry.py`
+- [X] T046 [US3] Wire full-lap chart and trace event emission through `POST /api/chat/stream` in `backend/app/chat/router.py`
+- [X] T047 [P] [US3] Update frontend `frontend/src/components/ChartStage/PlotlyChart.tsx` to handle full-lap multi-channel zoom and pan interactions
+- [X] T048 [P] [US3] Add full-lap comparison preset prompts in `frontend/src/components/ChatPanel/PresetPrompts.tsx`
 
 **Checkpoint**: User Story 3 complete and verified independently alongside US1 and US2.
 

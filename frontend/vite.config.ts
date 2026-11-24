@@ -16,6 +16,14 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
+        // Disable proxy buffering for immediate SSE chunk delivery
+        configure: (proxy, _options) => {
+          proxy.on('proxyRes', (_proxyRes, _req, res) => {
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+          });
+        },
       },
     },
   },

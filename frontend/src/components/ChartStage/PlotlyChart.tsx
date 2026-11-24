@@ -12,17 +12,23 @@ export function PlotlyChart({ spec }: PlotlyChartProps) {
   useEffect(() => {
     if (!containerRef.current || !spec) return;
 
+    const isFullLap = spec.chart_type === 'full_lap_comparison';
+
     // Ensure layout uses dark HUD background #0B0F17
     const layout = {
       ...spec.layout,
       paper_bgcolor: '#0B0F17',
       plot_bgcolor: '#0B0F17',
       autosize: true,
+      hovermode: isFullLap ? 'x unified' : (spec.layout?.hovermode || 'closest'),
     };
 
     const config = {
       responsive: true,
-      displayModeBar: false,
+      displayModeBar: isFullLap ? 'hover' : false,
+      modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+      displaylogo: false,
+      scrollZoom: isFullLap,
       ...(spec.config || {}),
     };
 

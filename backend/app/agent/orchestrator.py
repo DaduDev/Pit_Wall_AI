@@ -18,12 +18,13 @@ import json
 import logging
 import re
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import litellm
 from backend.app.config import settings
 from backend.app.agent.prompts.system import RACE_ENGINEER_SYSTEM_PROMPT
 from backend.app.agent.tools.historical_sql import query_historical_f1
 from backend.app.agent.tools.corner_compare import compare_corner_telemetry
+from backend.app.agent.tools.telemetry import compare_full_lap_telemetry
 from backend.app.chat.session import ConversationSession
 from backend.app.chat.streaming import (
     format_status_event,
@@ -83,6 +84,132 @@ CORNER_COMPARE_TOOL_DEF = {
             "required": ["corner", "driver1", "driver2"]
         }
     }
+}
+
+FULL_LAP_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "compare_full_lap_telemetry",
+        "description": "Compare two Formula 1 drivers across an entire lap using synchronized 5-meter aligned telemetry (Speed, Cumulative Delta, Throttle & Brake, Gear) and sector splits.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "year": {"type": "integer", "description": "Season year (2023 onwards). Default 2024."},
+                "grand_prix": {"type": "string", "description": "Grand Prix or circuit name (e.g. Monza, Spa, Silverstone, Suzuka)."},
+                "driver1": {"type": "string", "description": "First driver code or surname (e.g. VER, Verstappen)."},
+                "driver2": {"type": "string", "description": "Second driver code or surname (e.g. NOR, Norris)."},
+                "session_type": {"type": "string", "description": "Session type: Q (Qualifying), FP1, FP2, FP3, R. Default Q."}
+            },
+            "required": ["driver1", "driver2"]
+        }
+    }
+}
+
+# Comprehensive Grand Prix and circuit mapping for entity extraction and session routing
+ORCHESTRATOR_CIRCUIT_MAP: Dict[str, Tuple[str, str]] = {
+    # Canada / Montreal
+    "canadian": ("Montreal", "villeneuve"),
+    "canada": ("Montreal", "villeneuve"),
+    "montreal": ("Montreal", "villeneuve"),
+    "montréal": ("Montreal", "villeneuve"),
+    "villeneuve": ("Montreal", "villeneuve"),
+    "circuit gilles villeneuve": ("Montreal", "villeneuve"),
+    "gilles villeneuve": ("Montreal", "villeneuve"),
+    # Italy / Monza
+    "monza": ("Monza", "monza"),
+    "italian": ("Monza", "monza"),
+    "italy": ("Monza", "monza"),
+    # Great Britain / Silverstone
+    "silverstone": ("Silverstone", "silverstone"),
+    "british": ("Silverstone", "silverstone"),
+    "britain": ("Silverstone", "silverstone"),
+    "great britain": ("Silverstone", "silverstone"),
+    "united kingdom": ("Silverstone", "silverstone"),
+    "uk": ("Silverstone", "silverstone"),
+    "england": ("Silverstone", "silverstone"),
+    # Belgium / Spa
+    "spa": ("Spa", "spa"),
+    "spa-francorchamps": ("Spa", "spa"),
+    "belgian": ("Spa", "spa"),
+    "belgium": ("Spa", "spa"),
+    # Japan / Suzuka
+    "suzuka": ("Suzuka", "suzuka"),
+    "japanese": ("Suzuka", "suzuka"),
+    "japan": ("Suzuka", "suzuka"),
+    # Netherlands / Zandvoort
+    "zandvoort": ("Zandvoort", "zandvoort"),
+    "dutch": ("Zandvoort", "zandvoort"),
+    "netherlands": ("Zandvoort", "zandvoort"),
+    # Austria / Red Bull Ring
+    "austria": ("Red Bull Ring", "red_bull_ring"),
+    "austrian": ("Red Bull Ring", "red_bull_ring"),
+    "spielberg": ("Red Bull Ring", "red_bull_ring"),
+    "red bull ring": ("Red Bull Ring", "red_bull_ring"),
+    # Brazil / Interlagos
+    "interlagos": ("Interlagos", "interlagos"),
+    "brazil": ("Interlagos", "interlagos"),
+    "brazilian": ("Interlagos", "interlagos"),
+    "sao paulo": ("Interlagos", "interlagos"),
+    "são paulo": ("Interlagos", "interlagos"),
+    # Monaco
+    "monaco": ("Monaco", "monaco"),
+    "monte carlo": ("Monaco", "monaco"),
+    # Hungary / Hungaroring
+    "hungary": ("Hungaroring", "hungaroring"),
+    "hungarian": ("Hungaroring", "hungaroring"),
+    "hungaroring": ("Hungaroring", "hungaroring"),
+    "budapest": ("Hungaroring", "hungaroring"),
+    # Azerbaijan / Baku
+    "baku": ("Baku", "baku"),
+    "azerbaijan": ("Baku", "baku"),
+    # Singapore
+    "singapore": ("Singapore", "marina_bay"),
+    "marina bay": ("Singapore", "marina_bay"),
+    # USA / Austin
+    "cota": ("Austin", "americas"),
+    "austin": ("Austin", "americas"),
+    "united states": ("Austin", "americas"),
+    "usa": ("Austin", "americas"),
+    # Mexico / Mexico City
+    "mexico": ("Mexico City", "rodriguez"),
+    "mexican": ("Mexico City", "rodriguez"),
+    "mexico city": ("Mexico City", "rodriguez"),
+    "rodriguez": ("Mexico City", "rodriguez"),
+    # Las Vegas
+    "las vegas": ("Las Vegas", "vegas"),
+    "vegas": ("Las Vegas", "vegas"),
+    # Qatar / Lusail
+    "qatar": ("Lusail", "losail"),
+    "lusail": ("Lusail", "losail"),
+    "losail": ("Lusail", "losail"),
+    # Abu Dhabi / Yas Marina
+    "abu dhabi": ("Abu Dhabi", "yas_marina"),
+    "yas marina": ("Abu Dhabi", "yas_marina"),
+    # Bahrain / Sakhir
+    "bahrain": ("Sakhir", "bahrain"),
+    "sakhir": ("Sakhir", "bahrain"),
+    # Saudi Arabia / Jeddah
+    "jeddah": ("Jeddah", "jeddah"),
+    "saudi": ("Jeddah", "jeddah"),
+    "saudi arabia": ("Jeddah", "jeddah"),
+    # Australia / Melbourne
+    "melbourne": ("Melbourne", "albert_park"),
+    "australia": ("Melbourne", "albert_park"),
+    "australian": ("Melbourne", "albert_park"),
+    # China / Shanghai
+    "shanghai": ("Shanghai", "shanghai"),
+    "chinese": ("Shanghai", "shanghai"),
+    "china": ("Shanghai", "shanghai"),
+    # Emilia Romagna / Imola
+    "imola": ("Imola", "imola"),
+    "emilia romagna": ("Imola", "imola"),
+    # Miami
+    "miami": ("Miami", "miami"),
+    # Spain / Catalunya
+    "spain": ("Catalunya", "catalunya"),
+    "spanish": ("Catalunya", "catalunya"),
+    "barcelona": ("Catalunya", "catalunya"),
+    "catalunya": ("Catalunya", "catalunya"),
 }
 
 
@@ -221,6 +348,131 @@ class RaceEngineerOrchestrator:
             return match_direct.group(1).strip()
         return None
 
+    def _extract_circuit_and_key(
+        self,
+        query: str,
+        default_gp: str = "Monza",
+        default_key: str = "monza",
+        session: Optional[ConversationSession] = None,
+    ) -> Tuple[str, str]:
+        """
+        Resolves circuit from user query.
+        NEVER inherits last_circuit from previous turn if the user query explicitly mentions
+        any circuit, country, demonym, city, or Grand Prix.
+        """
+        q = query.lower()
+
+        # 1. Match known aliases (longest first to avoid substring collisions)
+        for alias in sorted(ORCHESTRATOR_CIRCUIT_MAP.keys(), key=len, reverse=True):
+            if re.search(rf"\b{re.escape(alias)}\b", q):
+                return ORCHESTRATOR_CIRCUIT_MAP[alias]
+
+        # 2. Check if the query explicitly mentions a Grand Prix or circuit we couldn't match
+        # If so, do NOT blindly inherit an unrelated circuit from the previous turn!
+        has_gp_mention = any(w in q for w in [" gp", "grand prix", "circuit", "autodromo", "autódromo"])
+
+        # 3. Inherit from session ONLY if user query has NO circuit or GP reference
+        if not has_gp_mention and session and hasattr(session, "last_entities") and session.last_entities:
+            if session.last_entities.grand_prix:
+                inherited_gp = session.last_entities.grand_prix
+                inherited_key = session.last_entities.circuit_key or inherited_gp.lower()
+                return inherited_gp, inherited_key
+
+        return default_gp, default_key
+
+    def _parse_full_lap_intent(
+        self,
+        user_query: str,
+        session: Optional[ConversationSession] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Parses user intent for full-lap telemetry overlay comparisons.
+        Matches keywords like 'full lap', 'entire lap', 'whole lap', 'overlay laps', etc.
+        """
+        q = user_query.lower()
+        full_lap_keywords = [
+            "full lap", "full-lap", "entire lap", "whole lap", "complete lap",
+            "overlay lap", "overlay laps", "lap overlay", "overlay full",
+            "full telemetry", "lap comparison", "over the lap", "through the lap",
+            "overlay",
+        ]
+        has_full_lap_kw = any(kw in q for kw in full_lap_keywords)
+        # Exclude if it explicitly specifies a corner and does not specify "full lap"
+        has_corner = any(
+            c in q for c in [
+                "copse", "eau rouge", "130r", "parabolica", "la source", "variante",
+                "turn 1", "turn 2", "turn 3", "turn 4", "turn 5", "turn 6", "turn 7",
+                "turn 8", "turn 9", "turn 10", "turn 11", "turn 12", "turn 13", "turn 14", "turn 15"
+            ]
+        )
+        if has_corner and not any(kw in q for kw in ["full lap", "full-lap", "entire lap", "whole lap"]):
+            return None
+
+        if not has_full_lap_kw:
+            return None
+
+        # Extract drivers
+        known_drivers = {
+            "verstappen": "VER", "ver": "VER", "max": "VER",
+            "norris": "NOR", "nor": "NOR", "lando": "NOR",
+            "hamilton": "HAM", "ham": "HAM", "lewis": "HAM",
+            "leclerc": "LEC", "lec": "LEC", "charles": "LEC",
+            "piastri": "PIA", "pia": "PIA", "oscar": "PIA",
+            "alonso": "ALO", "alo": "ALO", "fernando": "ALO",
+            "sainz": "SAI", "sai": "SAI", "carlos": "SAI",
+            "russell": "RUS", "rus": "RUS", "george": "RUS",
+            "perez": "PER", "per": "PER", "checo": "PER",
+        }
+
+        matched_drivers = []
+        for name, code in known_drivers.items():
+            if re.search(rf"\b{name}\b", q):
+                if code not in matched_drivers:
+                    matched_drivers.append(code)
+
+        # Inherit drivers from session if missing in follow-up
+        if session and hasattr(session, "last_entities") and session.last_entities:
+            last_drivers = session.last_entities.drivers or []
+            for d in last_drivers:
+                if len(matched_drivers) < 2 and d not in matched_drivers:
+                    matched_drivers.append(d)
+
+        if len(matched_drivers) < 2:
+            return None
+
+        circuit_found, _ = self._extract_circuit_and_key(
+            q,
+            default_gp="Monza",
+            default_key="monza",
+            session=session,
+        )
+
+        m_year = re.search(r"\b(19\d\d|20\d\d)\b", q)
+        if m_year:
+            year_found = int(m_year.group(1))
+        elif session and hasattr(session, "last_entities") and session.last_entities and session.last_entities.year:
+            year_found = session.last_entities.year
+        else:
+            year_found = 2024
+
+        session_type = "Q"
+        if "race" in q:
+            session_type = "R"
+        elif "fp1" in q:
+            session_type = "FP1"
+        elif "fp2" in q:
+            session_type = "FP2"
+        elif "fp3" in q:
+            session_type = "FP3"
+
+        return {
+            "driver1": matched_drivers[0],
+            "driver2": matched_drivers[1],
+            "grand_prix": circuit_found,
+            "year": year_found,
+            "session_type": session_type,
+        }
+
     def _parse_corner_comparison_intent(
         self,
         user_query: str,
@@ -263,47 +515,12 @@ class RaceEngineerOrchestrator:
             return None
 
         # Resolve circuit / Grand Prix
-        circuit_map = {
-            "silverstone": ("Silverstone", "silverstone"),
-            "british": ("Silverstone", "silverstone"),
-            "spa": ("Spa", "spa"),
-            "belgian": ("Spa", "spa"),
-            "monza": ("Monza", "monza"),
-            "italian": ("Monza", "monza"),
-            "suzuka": ("Suzuka", "suzuka"),
-            "japanese": ("Suzuka", "suzuka"),
-            "japan": ("Suzuka", "suzuka"),
-            "interlagos": ("Interlagos", "interlagos"),
-            "brazil": ("Interlagos", "interlagos"),
-            "brazilian": ("Interlagos", "interlagos"),
-            "sao paulo": ("Interlagos", "interlagos"),
-            "são paulo": ("Interlagos", "interlagos"),
-            "austria": ("Red Bull Ring", "red_bull_ring"),
-            "austrian": ("Red Bull Ring", "red_bull_ring"),
-            "red bull ring": ("Red Bull Ring", "red_bull_ring"),
-            "zandvoort": ("Zandvoort", "zandvoort"),
-            "dutch": ("Zandvoort", "zandvoort"),
-            "monaco": ("Monaco", "monaco"),
-            "hungaroring": ("Hungaroring", "hungaroring"),
-        }
-
-        circuit_found = None
-        circuit_key = None
-        for alias, (gp_name, c_key) in circuit_map.items():
-            if alias in q:
-                circuit_found = gp_name
-                circuit_key = c_key
-                break
-
-        # Inherit circuit if missing in message
-        if not circuit_found and session and hasattr(session, "last_entities") and session.last_entities:
-            if session.last_entities.grand_prix:
-                circuit_found = session.last_entities.grand_prix
-                circuit_key = session.last_entities.circuit_key or circuit_found.lower()
-
-        if not circuit_found:
-            circuit_found = "Silverstone"
-            circuit_key = "silverstone"
+        circuit_found, circuit_key = self._extract_circuit_and_key(
+            q,
+            default_gp="Silverstone",
+            default_key="silverstone",
+            session=session,
+        )
 
         # Resolve Year
         m_year = re.search(r"\b(19\d\d|20\d\d)\b", q)
@@ -445,6 +662,94 @@ class RaceEngineerOrchestrator:
 
         return None
 
+    async def _stream_full_lap_commentary(
+        self,
+        user_message: str,
+        result: Dict[str, Any],
+        session: ConversationSession,
+    ) -> AsyncGenerator[str, None]:
+        """Streams race engineer commentary for full-lap telemetry overlay comparison."""
+        metrics = result["metrics"]
+        meta_a = result["metadata"]["driver_a"]
+        meta_b = result["metadata"]["driver_b"]
+        code_a = meta_a["driver_code"]
+        code_b = meta_b["driver_code"]
+
+        lap_a = metrics["lap_times"]["driver_a"]
+        lap_b = metrics["lap_times"]["driver_b"]
+        delta_s = metrics["lap_times"]["delta_s"]
+        faster = code_a if delta_s > 0 else code_b
+        delta_abs = abs(delta_s)
+
+        s1 = metrics["sectors"]["sector_1"]
+        s2 = metrics["sectors"]["sector_2"]
+        s3 = metrics["sectors"]["sector_3"]
+
+        st = metrics["speed_trap"]
+        thr = metrics["full_throttle_pct"]
+        brk = metrics["braking_pct"]
+
+        def _fmt(s: float) -> str:
+            if s <= 0:
+                return "0:00.000"
+            m = int(s // 60)
+            sec = s % 60
+            return f"{m}:{sec:06.3f}"
+
+        commentary_prompt = (
+            f"User Question: '{user_message}'\n"
+            f"Session: {meta_a.get('year')} {meta_a.get('event_name')} ({meta_a.get('session_type')})\n"
+            f"Driver A: {code_a} ({meta_a.get('team')}) — Lap {meta_a.get('lap_number')}: {_fmt(lap_a)}\n"
+            f"Driver B: {code_b} ({meta_b.get('team')}) — Lap {meta_b.get('lap_number')}: {_fmt(lap_b)}\n"
+            f"Overall Lap Delta: {faster} faster by {delta_abs:.3f}s\n"
+            f"Sector Splits:\n"
+            f"- Sector 1: {code_a} {s1['driver_a']}s vs {code_b} {s1['driver_b']}s ({s1['faster']} {abs(s1['delta_s']):.3f}s)\n"
+            f"- Sector 2: {code_a} {s2['driver_a']}s vs {code_b} {s2['driver_b']}s ({s2['faster']} {abs(s2['delta_s']):.3f}s)\n"
+            f"- Sector 3: {code_a} {s3['driver_a']}s vs {code_b} {s3['driver_b']}s ({s3['faster']} {abs(s3['delta_s']):.3f}s)\n"
+            f"Speed Trap & Dynamics:\n"
+            f"- Speed Trap: {code_a} {st['driver_a']} km/h vs {code_b} {st['driver_b']} km/h (Delta: {st['delta_kph']:+.1f} km/h)\n"
+            f"- Full Throttle: {code_a} {thr['driver_a']}% vs {code_b} {thr['driver_b']}%\n"
+            f"- Under Braking: {code_a} {brk['driver_a']}% vs {code_b} {brk['driver_b']}%\n\n"
+            "Race Engineer Instructions:\n"
+            "- A 4-panel telemetry chart with Sector 1/2 markers is plotted on screen. Do not recite every single number.\n"
+            "- Deliver a concise, high-signal 3 to 4 sentence race engineer debrief in authentic F1 pit-wall radio tone.\n"
+            "- State who set the faster lap of the pair and the exact finish delta (e.g. 'edged out Driver B by X.XXXs').\n"
+            "- CRITICAL RULE: NEVER claim a driver 'secured pole position', 'won the session', 'won qualifying', or 'took P1' from this 2-driver comparison unless the tool output explicitly confirms P1 overall across the full field. Say 'edged out [Driver B]' or 'set the faster lap of the pair' instead.\n"
+            "- Highlight key sector differences (where time was gained or lost) and mention top speed / throttle commitment.\n"
+            "- Never hallucinate or alter any numbers. NEVER use awkward slang or pit metaphors like 'box this data', 'box this lap', or 'box now'."
+        )
+
+        if self.provider == "gemini" and self.api_key:
+            try:
+                chunk_emitted = False
+                async for chunk in self._stream_gemini_commentary(commentary_prompt):
+                    if chunk:
+                        chunk_emitted = True
+                        yield chunk
+                if chunk_emitted:
+                    return
+            except Exception as e:
+                logger.warning(f"Gemini full-lap stream failed: {e}. Falling back to deterministic radio debrief.")
+
+        s1_adv = f"{s1['faster']} had the upper hand in Sector 1 (-{abs(s1['delta_s']):.3f}s)"
+        s2_adv = f"Sector 2 went to {s2['faster']} (-{abs(s2['delta_s']):.3f}s)"
+        s3_adv = f"{s3['faster']} sealed it in Sector 3 (-{abs(s3['delta_s']):.3f}s)"
+
+        fallback_text = (
+            f"Copy that. Full-lap telemetry confirms **{faster}** set the faster lap of the pair by **{delta_abs:.3f}s** "
+            f"({code_a} **{_fmt(lap_a)}** vs {code_b} **{_fmt(lap_b)}**). "
+            f"{s1_adv}, while {s2_adv} and {s3_adv}. "
+            f"Speed trap readings show **{code_a}** at **{st['driver_a']} km/h** against **{code_b}** at **{st['driver_b']} km/h**, "
+            f"with **{code_a}** spending **{thr['driver_a']}%** of the lap at full throttle versus **{thr['driver_b']}%** for **{code_b}**. "
+            "Synchronized multi-panel traces with sector boundaries are plotted on your stage."
+        )
+
+        words = fallback_text.split(" ")
+        for i in range(0, len(words), 3):
+            chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
+            yield chunk
+            await asyncio.sleep(0.01)
+
     async def _stream_corner_commentary(
         self,
         user_message: str,
@@ -484,7 +789,7 @@ class RaceEngineerOrchestrator:
             "- Deliver a concise, high-signal 2 to 4 sentence race engineer debrief in authentic F1 radio tone.\n"
             "- State who was faster through the corner and the exact delta.\n"
             "- Cite apex minimum speeds and braking or throttle differences.\n"
-            "- Never hallucinate or alter any numbers. No awkward slang."
+            "- Never hallucinate or alter any numbers. NEVER use awkward slang or pit metaphors like 'box this data' or 'box now'."
         )
 
         if self.provider == "gemini" and self.api_key:
@@ -644,7 +949,127 @@ class RaceEngineerOrchestrator:
             return
 
         # ==========================================
-        # ROUTE 1: Corner Telemetry Comparison (US2)
+        # ROUTE 1: Full-Lap Telemetry Overlay (US3)
+        # ==========================================
+        full_lap_intent = self._parse_full_lap_intent(user_message, session=session)
+        if full_lap_intent:
+            if full_lap_intent["year"] < 2023:
+                era_msg = (
+                    f"Car sensor telemetry (ECU speed, throttle, brake, gear) is digitally available for 2023–present via the OpenF1 REST API. "
+                    f"For the {full_lap_intent['year']} {full_lap_intent['grand_prix']}, high-frequency sensor telemetry is not available, "
+                    f"but official race classifications, lap times, and sector data are available in Historical Analytics."
+                )
+                yield format_status_event("era_boundary", era_msg)
+
+                gp_clean = full_lap_intent['grand_prix'].lower()
+                sql = (
+                    f"SELECT year, round, grand_prix, position, driver_name, driver_code, constructor, points, finish_time, grid, status "
+                    f"FROM v_race_results "
+                    f"WHERE year = {full_lap_intent['year']} "
+                    f"AND (lower(grand_prix) LIKE '%{gp_clean}%' OR lower(circuit_country) LIKE '%{gp_clean}%') "
+                    f"ORDER BY position ASC LIMIT 15;"
+                )
+                tool_result = await asyncio.to_thread(query_historical_f1, sql, chart_title=f"{full_lap_intent['year']} {full_lap_intent['grand_prix']} Results")
+
+                trace_payload = {
+                    "data_domain": "historical",
+                    "query": tool_result["sql"],
+                    "execution_time_ms": tool_result["execution_time_ms"],
+                    "row_count": tool_result["row_count"],
+                    "confidence": 1.0,
+                    "notes": f"Full-lap telemetry unavailable for pre-2023 ({full_lap_intent['year']}). Retrieved official race results from DuckDB.",
+                }
+                yield format_trace_event(**trace_payload)
+
+                if tool_result.get("chart"):
+                    yield format_chart_event(
+                        chart_type=tool_result["chart"]["chart_type"],
+                        spec=tool_result["chart"]["spec"],
+                        caption=tool_result["chart"].get("caption", f"{full_lap_intent['year']} {full_lap_intent['grand_prix']} Results"),
+                    )
+
+                yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
+
+                explanation_prefix = (
+                    f"⚠️ **Telemetry Era Boundary Notice**: Free high-frequency car sensor telemetry is digitally available for **2023–present** via OpenF1. "
+                    f"For the **{full_lap_intent['year']} {full_lap_intent['grand_prix']}**, car sensor telemetry is not available, but official race classifications and timings from our historical database are plotted on your stage:\n\n"
+                )
+                yield format_text_event(explanation_prefix)
+
+                engineer_text = explanation_prefix
+                async for delta in self._stream_commentary(user_message, tool_result, session):
+                    yield format_text_event(delta)
+                    engineer_text += delta
+
+                session.add_user_message(user_message)
+                session.add_assistant_message(engineer_text)
+                session.update_entities(
+                    year=full_lap_intent["year"],
+                    grand_prix=full_lap_intent["grand_prix"],
+                    drivers=[full_lap_intent["driver1"], full_lap_intent["driver2"]],
+                    tool="historical_sql",
+                )
+                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
+                yield format_done_event(total_duration_ms)
+                return
+
+            yield format_status_event(
+                "loading_telemetry",
+                f"Loading full-lap telemetry for {full_lap_intent['driver1']} vs {full_lap_intent['driver2']} at {full_lap_intent['year']} {full_lap_intent['grand_prix']}...",
+            )
+
+            try:
+                lap_result = await asyncio.to_thread(compare_full_lap_telemetry, **full_lap_intent)
+
+                # Emit trace
+                yield format_trace_event(**lap_result["trace"])
+
+                # Emit full-lap multi-panel chart
+                yield format_chart_event(
+                    chart_type=lap_result["chart"]["chart_type"],
+                    spec=lap_result["chart"]["spec"],
+                    caption=lap_result["chart"]["caption"],
+                )
+
+                yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
+
+                # Stream commentary
+                engineer_text = ""
+                async for delta in self._stream_full_lap_commentary(user_message, lap_result, session):
+                    yield format_text_event(delta)
+                    engineer_text += delta
+
+                session.add_user_message(user_message)
+                session.add_assistant_message(engineer_text)
+                session.update_entities(
+                    year=full_lap_intent["year"],
+                    grand_prix=full_lap_intent["grand_prix"],
+                    drivers=[full_lap_intent["driver1"], full_lap_intent["driver2"]],
+                    tool="full_lap",
+                )
+
+                _RESPONSE_CACHE[cache_key] = {
+                    "text": engineer_text,
+                    "chart": lap_result["chart"],
+                    "trace": lap_result["trace"],
+                }
+
+                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
+                yield format_done_event(total_duration_ms)
+                return
+
+            except Exception as e:
+                logger.error(f"Full-lap telemetry comparison encountered error: {e}", exc_info=True)
+                yield format_error_event(
+                    code="TELEMETRY_ERROR",
+                    message=f"Full-lap telemetry error: {str(e)}",
+                    retryable=False,
+                )
+                yield format_done_event(int((time.perf_counter() - start_time) * 1000))
+                return
+
+        # ==========================================
+        # ROUTE 2: Corner Telemetry Comparison (US2)
         # ==========================================
         corner_intent = self._parse_corner_comparison_intent(user_message, session=session)
         if corner_intent:

@@ -7,6 +7,7 @@ Provides fuzzy and canonical matching for:
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from rapidfuzz import process, fuzz
@@ -237,9 +238,9 @@ class EntityResolver:
         # 0. Canonical GP / Circuit Aliases (e.g. "Brazil", "Interlagos", "Suzuka")
         alias_target = GP_CIRCUIT_ALIASES.get(q)
         if not alias_target:
-            # Check if any alias key is contained in query
-            for alias_key, target in GP_CIRCUIT_ALIASES.items():
-                if alias_key in q or q in alias_key:
+            # Check if any alias key is contained in query (longest phrases first)
+            for alias_key, target in sorted(GP_CIRCUIT_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
+                if re.search(rf"\b{re.escape(alias_key)}\b", q) or alias_key in q:
                     alias_target = target
                     break
 
