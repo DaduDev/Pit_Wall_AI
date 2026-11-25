@@ -21,6 +21,16 @@ HUD_ACCENT_RED = "#E10600"
 HUD_ACCENT_CYAN = "#38BDF8"
 HUD_ACCENT_YELLOW = "#FACC15"
 
+# Official Pirelli tyre compound colors for strategy and degradation analytics
+PIRELLI_COMPOUND_COLORS = {
+    "SOFT": "#FF3333",
+    "MEDIUM": "#FFD700",
+    "HARD": "#F0F0F0",
+    "INTERMEDIATE": "#39B54A",
+    "WET": "#00AEEF",
+    "UNKNOWN": "#94A3B8",
+}
+
 # Fallback team colors in hex if FastF1 session does not contain specific mapping
 FALLBACK_TEAM_COLORS = {
     "Red Bull Racing": "#3671C6",

@@ -4,12 +4,38 @@ Formats typed events strictly compliant with contracts/api-contracts.md.
 """
 
 import json
+import math
 from typing import Any, Dict, Optional
+import numpy as np
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    """
+    Recursively converts NaN, Infinity, and numpy types to JSON-compliant primitives.
+    Guarantees zero invalid NaN/Infinity tokens in SSE data streams.
+    """
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif isinstance(obj, (np.floating, float)):
+        val = float(obj)
+        return None if (math.isnan(val) or math.isinf(val)) else val
+    elif isinstance(obj, (np.integer, int)):
+        return int(obj)
+    elif isinstance(obj, np.ndarray):
+        return [_sanitize_for_json(x) for x in obj.tolist()]
+    elif isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(x) for x in obj]
+    return obj
 
 
 def sse_message(event_type: str, data: Dict[str, Any]) -> str:
-    """Formats a Server-Sent Event frame."""
-    json_data = json.dumps(data, ensure_ascii=False)
+    """Formats a Server-Sent Event frame with zero-NaN/Infinity guarantee."""
+    sanitized = _sanitize_for_json(data)
+    json_data = json.dumps(sanitized, ensure_ascii=False, allow_nan=False)
     return f"event: {event_type}\ndata: {json_data}\n\n"
 
 
@@ -28,14 +54,21 @@ def format_text_event(delta: str) -> str:
     return sse_message("text", {"delta": delta})
 
 
-def format_chart_event(chart_type: str, spec: Dict[str, Any], caption: str = "") -> str:
+def format_chart_event(
+    chart_type: str,
+    spec: Dict[str, Any],
+    caption: str = "",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> str:
     """Emitted once a Plotly JSON specification is generated."""
+    meta = metadata or (spec.get("metadata") if isinstance(spec, dict) else {}) or {}
     return sse_message(
         "chart",
         {
             "chart_type": chart_type,
             "spec": spec,
             "caption": caption,
+            "metadata": meta,
         },
     )
 
@@ -46,9 +79,11 @@ def format_trace_event(
     execution_time_ms: Optional[float] = None,
     row_count: Optional[int] = None,
     telemetry_params: Optional[Dict[str, Any]] = None,
+    strategy_params: Optional[Dict[str, Any]] = None,
     interpolated_points: Optional[int] = None,
     confidence: float = 1.0,
     notes: Optional[str] = None,
+    **extra: Any,
 ) -> str:
     """Emitted with full provenance data for the collapsible Engineering Trace drawer."""
     payload: Dict[str, Any] = {
@@ -63,10 +98,16 @@ def format_trace_event(
         payload["row_count"] = row_count
     if telemetry_params is not None:
         payload["telemetry_params"] = telemetry_params
+    if strategy_params is not None:
+        payload["strategy_params"] = strategy_params
     if interpolated_points is not None:
         payload["interpolated_points"] = interpolated_points
     if notes is not None:
         payload["notes"] = notes
+
+    for k, v in extra.items():
+        if v is not None:
+            payload[k] = v
 
     return sse_message("trace", payload)
 

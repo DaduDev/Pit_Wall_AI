@@ -138,17 +138,17 @@
 
 ### Tests for User Story 4
 
-- [ ] T049 [P] [US4] Create unit test for pit and Safety Car lap filtering in `backend/tests/test_strategy.py`
+- [X] T049 [P] [US4] Create unit test for pit and Safety Car lap filtering in `backend/tests/test_strategy.py`
 
 ### Implementation for User Story 4
 
-- [ ] T050 [P] [US4] Implement stint extraction and outlier filtering tool in `backend/app/agent/tools/strategy.py` (cites `data-model.md`: `Stint`, `lap_times.lap`, `lap_times.milliseconds`, `SessionMetadata.compound`)
-- [ ] T051 [US4] Implement linear regression degradation trend line calculation per stint using NumPy in `backend/app/agent/tools/strategy.py`
-- [ ] T052 [US4] Implement tyre stint degradation Plotly scatter + line chart builder colored by compound in `backend/app/charts/strategy_charts.py`
-- [ ] T053 [US4] Handle red-flagged races and multi-part stints in `backend/app/agent/tools/strategy.py`
-- [ ] T054 [US4] Register tyre stint analysis tool in Google ADK agent in `backend/app/agent/orchestrator.py`
-- [ ] T055 [US4] Wire tyre degradation events through SSE stream in `backend/app/chat/router.py`
-- [ ] T056 [P] [US4] Add tyre degradation presets and compound legend support in `frontend/src/components/ChatPanel/PresetPrompts.tsx` and `frontend/src/components/ChartStage/PlotlyChart.tsx`
+- [X] T050 [P] [US4] Implement stint extraction and outlier filtering tool in `backend/app/agent/tools/strategy.py` (cites `data-model.md`: `Stint`, `lap_times.lap`, `lap_times.milliseconds`, `SessionMetadata.compound`)
+- [X] T051 [US4] Implement linear regression degradation trend line calculation per stint using NumPy in `backend/app/agent/tools/strategy.py`
+- [X] T052 [US4] Implement tyre stint degradation Plotly scatter + line chart builder colored by compound in `backend/app/charts/strategy_charts.py`
+- [X] T053 [US4] Handle red-flagged races and multi-part stints in `backend/app/agent/tools/strategy.py`
+- [X] T054 [US4] Register tyre stint analysis tool in Google ADK agent in `backend/app/agent/orchestrator.py`
+- [X] T055 [US4] Wire tyre degradation events through SSE stream in `backend/app/chat/router.py`
+- [X] T056 [P] [US4] Add tyre degradation presets and compound legend support in `frontend/src/components/ChatPanel/PresetPrompts.tsx` and `frontend/src/components/ChartStage/PlotlyChart.tsx`
 
 **Checkpoint**: User Story 4 functional; race strategy insights available with clean lap-time filtering.
 

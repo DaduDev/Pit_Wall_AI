@@ -470,6 +470,7 @@ def compare_full_lap_telemetry(
         "chart": {
             "chart_type": "full_lap_comparison",
             "spec": chart_spec,
+            "metadata": chart_spec.get("metadata", {}),
             "caption": f"Full-Lap Telemetry: {code_1} vs {code_2} ({year} {clean_gp})",
         },
         "trace": trace,

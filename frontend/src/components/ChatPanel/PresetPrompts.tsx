@@ -1,9 +1,14 @@
-import { Zap, Gauge, Layers } from 'lucide-react';
+import { Zap, Gauge, Layers, Timer } from 'lucide-react';
 
 interface PresetPromptsProps {
   onSelect: (prompt: string) => void;
   disabled?: boolean;
 }
+
+const STRATEGY_PRESETS = [
+  'Compare Leclerc vs Piastri tyre degradation and stint strategy at 2024 Italian GP',
+  'Show tyre degradation and race pace for Leclerc at Monza 2024',
+];
 
 const FULL_LAP_PRESETS = [
   'Overlay Verstappen vs Norris full lap at 2024 Italian GP Qualifying',
@@ -26,6 +31,26 @@ const HISTORICAL_PRESETS = [
 export function PresetPrompts({ onSelect, disabled }: PresetPromptsProps) {
   return (
     <div className="space-y-2 p-3 bg-[#0B0F17]/80 border-t border-[#1E293B]">
+      {/* Tyre Degradation & Strategy */}
+      <div>
+        <div className="flex items-center space-x-1 text-[10px] font-mono uppercase tracking-wider text-amber-400 mb-1">
+          <Timer className="h-3 w-3 text-amber-400" />
+          <span>Tyre Degradation & Strategy (2023+)</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {STRATEGY_PRESETS.map((query) => (
+            <button
+              key={query}
+              disabled={disabled}
+              onClick={() => onSelect(query)}
+              className="rounded border border-[#1E293B] bg-[#121824] px-2.5 py-1 text-left text-xs font-mono text-[#E2E8F0] transition-colors hover:border-amber-400 hover:text-white disabled:opacity-50"
+            >
+              {query}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Full-Lap Telemetry Overlays */}
       <div>
         <div className="flex items-center space-x-1 text-[10px] font-mono uppercase tracking-wider text-emerald-400 mb-1">

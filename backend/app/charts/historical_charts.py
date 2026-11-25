@@ -337,6 +337,35 @@ def get_clean_label(row: Dict[str, Any], label_col: str, index: int) -> str:
     return str(val).strip()
 
 
+def _attach_historical_metadata(
+    chart_dict: Optional[Dict[str, Any]],
+    sql: str,
+    columns: List[str],
+    data: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if not chart_dict:
+        return None
+    m_year = re.search(r"\b(19\d\d|20\d\d)\b", sql)
+    extracted_year = int(m_year.group(1)) if m_year else (data[0].get("year") if data and "year" in data[0] else None)
+    gp_name = None
+    if data and "grand_prix" in data[0]:
+        gp_name = data[0].get("grand_prix")
+
+    hist_meta = {
+        "domain": "historical",
+        "year": extracted_year,
+        "grand_prix": gp_name,
+        "session_name": "Official Classification" if any("position" in c.lower() for c in columns) else "Historical Records",
+        "mode_label": "Historical Analytics • DuckDB",
+        "drivers": [],
+        "track_status": None,
+    }
+    chart_dict["metadata"] = hist_meta
+    if "spec" in chart_dict and isinstance(chart_dict["spec"], dict):
+        chart_dict["spec"]["metadata"] = hist_meta
+    return chart_dict
+
+
 def auto_build_historical_chart(
     sql: str,
     columns: List[str],
@@ -364,7 +393,7 @@ def auto_build_historical_chart(
 
         headers = [c.replace("_", " ").title() for c in display_cols]
         rows = [[row.get(c) for c in display_cols] for row in data[:20]]
-        return build_classification_table(title, headers, rows)
+        return _attach_historical_metadata(build_classification_table(title, headers, rows), sql, columns, data)
 
     # Pattern 2: Time-series / Trend over Years (Year + numeric metric)
     year_col = next((c for c in columns if c.lower() == "year" or "season" in c.lower()), None)
@@ -373,13 +402,18 @@ def auto_build_historical_chart(
         if metric_col and metric_col != year_col:
             x_vals = [row.get(year_col) for row in data]
             y_vals = [row.get(metric_col) for row in data]
-            return build_line_chart(
-                title=title,
-                x=x_vals,
-                y=y_vals,
-                x_title="Season Year",
-                y_title=metric_col.replace("_", " ").title(),
-                name=metric_col.replace("_", " ").title(),
+            return _attach_historical_metadata(
+                build_line_chart(
+                    title=title,
+                    x=x_vals,
+                    y=y_vals,
+                    x_title="Season Year",
+                    y_title=metric_col.replace("_", " ").title(),
+                    name=metric_col.replace("_", " ").title(),
+                ),
+                sql,
+                columns,
+                data,
             )
 
     # Pattern 3: Driver / Team / Circuit Leaderboard & Rankings (Horizontal Bar Chart)
@@ -392,18 +426,23 @@ def auto_build_historical_chart(
         clean_categories = [get_clean_label(row, label_col, idx) for idx, row in enumerate(top_data)]
         metric_values = [row.get(metric_col) for row in top_data]
 
-        return build_horizontal_ranking_bar_chart(
-            title=title,
-            categories=clean_categories,
-            values=metric_values,
-            metric_name=metric_col,
-            row_data=top_data,
+        return _attach_historical_metadata(
+            build_horizontal_ranking_bar_chart(
+                title=title,
+                categories=clean_categories,
+                values=metric_values,
+                metric_name=metric_col,
+                row_data=top_data,
+            ),
+            sql,
+            columns,
+            data,
         )
 
     # Fallback to Table for any result with <= 8 columns
     if len(columns) <= 8:
         headers = [c.replace("_", " ").title() for c in columns]
         rows = [[row.get(c) for c in columns] for row in data[:20]]
-        return build_classification_table(title, headers, rows)
+        return _attach_historical_metadata(build_classification_table(title, headers, rows), sql, columns, data)
 
     return None

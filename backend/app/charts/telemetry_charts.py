@@ -23,6 +23,7 @@ from backend.app.charts.plotly_theme import (
     HUD_ZERO_LINE_COLOR,
     get_driver_trace_styles,
     get_hud_layout_template,
+    resolve_team_color,
 )
 
 
@@ -705,17 +706,47 @@ def build_full_lap_comparison_figure(
 
     spec = fig.to_plotly_json()
     spec["chart_type"] = "full_lap_comparison"
+
+    color_a = resolve_team_color(meta_a.get("team", driver_a))
+    color_b = resolve_team_color(meta_b.get("team", driver_b))
+    style_a, style_b = get_driver_trace_styles(color_a, color_b)
+
+    standardized_drivers = [
+        {
+            "code": driver_a,
+            "name": meta_a.get("team", driver_a),
+            "color": style_a["color"],
+            "compound": meta_a.get("compound", "SOFT"),
+        },
+        {
+            "code": driver_b,
+            "name": meta_b.get("team", driver_b),
+            "color": style_b["color"],
+            "compound": meta_b.get("compound", "SOFT"),
+        },
+    ]
+
     spec["metadata"] = {
+        "domain": "telemetry",
+        "year": int(year_str) if str(year_str).isdigit() else 2024,
+        "grand_prix": event_title,
+        "session_name": session_title,
+        "mode_label": "Full-Lap Overlay • All Sectors",
+        "drivers": standardized_drivers,
+        "track_status": "DRY",
         "event_name": event_title,
-        "year": year_str,
         "session_type": session_title,
-        "drivers": [driver_a, driver_b],
         "driver_numbers": [meta_a.get("driver_number"), meta_b.get("driver_number")],
         "laps": [meta_a.get("lap_number"), meta_b.get("lap_number")],
         "lap_times": [time_a, time_b],
         "compounds": [meta_a.get("compound", "SOFT"), meta_b.get("compound", "SOFT")],
         "sector_boundaries_m": [s1_dist, s2_dist],
         "metrics": metrics or {},
+        "sector_summary": {
+            "sectors": (metrics or {}).get("sectors", {}),
+            "speed_trap": (metrics or {}).get("speed_trap", {}),
+            "lap_times": (metrics or {}).get("lap_times", {}),
+        } if metrics else None,
     }
 
     return spec

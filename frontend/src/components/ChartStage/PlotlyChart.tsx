@@ -12,6 +12,9 @@ export function PlotlyChart({ spec }: PlotlyChartProps) {
   useEffect(() => {
     if (!containerRef.current || !spec) return;
 
+    // Purge any existing Plotly instance on container to prevent trace reuse or stale state
+    Plotly.purge(containerRef.current);
+
     const isFullLap = spec.chart_type === 'full_lap_comparison';
 
     // Ensure layout uses dark HUD background #0B0F17
@@ -20,6 +23,7 @@ export function PlotlyChart({ spec }: PlotlyChartProps) {
       paper_bgcolor: '#0B0F17',
       plot_bgcolor: '#0B0F17',
       autosize: true,
+      datarevision: Date.now(),
       hovermode: isFullLap ? 'x unified' : (spec.layout?.hovermode || 'closest'),
     };
 
@@ -32,7 +36,13 @@ export function PlotlyChart({ spec }: PlotlyChartProps) {
       ...(spec.config || {}),
     };
 
-    Plotly.newPlot(containerRef.current, spec.data, layout, config);
+    const plotData = Array.isArray(spec.data) ? spec.data : [];
+
+    try {
+      Plotly.newPlot(containerRef.current, plotData, layout, config);
+    } catch (err) {
+      console.error('Plotly.newPlot failed to render:', err);
+    }
 
     const handleResize = () => {
       if (containerRef.current) {

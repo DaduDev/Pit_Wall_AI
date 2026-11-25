@@ -13,6 +13,8 @@ export function TrackMiniMap({ spec }: TrackMiniMapProps) {
   useEffect(() => {
     if (!containerRef.current || !spec) return;
 
+    Plotly.purge(containerRef.current);
+
     const layout = {
       ...spec.layout,
       paper_bgcolor: '#0B0F17',
@@ -40,7 +42,13 @@ export function TrackMiniMap({ spec }: TrackMiniMapProps) {
       ...(spec.config || {}),
     };
 
-    Plotly.newPlot(containerRef.current, spec.data, layout, config);
+    const plotData = Array.isArray(spec.data) ? spec.data : [];
+
+    try {
+      Plotly.newPlot(containerRef.current, plotData, layout, config);
+    } catch (err) {
+      console.error('TrackMiniMap Plotly.newPlot error:', err);
+    }
 
     const handleResize = () => {
       if (containerRef.current) {

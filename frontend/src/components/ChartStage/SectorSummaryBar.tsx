@@ -11,28 +11,49 @@ export function SectorSummaryBar({ chart }: SectorSummaryBarProps) {
   }
 
   const meta = chart.metadata || {};
-  const metrics = meta.metrics || {};
-  const sectors = metrics.sectors;
-  const speedTrap = metrics.speed_trap;
-  const lapTimes = metrics.lap_times;
-  const drivers = meta.drivers || ['DRV1', 'DRV2'];
-  const drvA = drivers[0];
-  const drvB = drivers[1];
+  const metrics = meta.metrics || meta.sector_summary || {};
+  const sectors = metrics?.sectors;
+  const speedTrap = metrics?.speed_trap;
+  const lapTimes = metrics?.lap_times;
 
   if (!sectors) {
     return null;
   }
 
+  const rawDrivers = Array.isArray(meta.drivers) ? meta.drivers : [];
+  const getDriverCode = (drv: any, fallback: string): string => {
+    if (!drv) return fallback;
+    if (typeof drv === 'string') return drv;
+    if (typeof drv === 'object' && drv.code) return String(drv.code);
+    return fallback;
+  };
+
+  const drvA = getDriverCode(rawDrivers[0], 'DRV1');
+  const drvB = getDriverCode(rawDrivers[1], 'DRV2');
+
   const s1 = sectors.sector_1;
   const s2 = sectors.sector_2;
   const s3 = sectors.sector_3;
 
-  const renderDeltaBadge = (delta: number, faster: string) => {
+  const fmtTime = (val?: number | null): string => {
+    if (val === undefined || val === null || isNaN(val)) return '--';
+    return `${Number(val).toFixed(3)}s`;
+  };
+
+  const fmtSpeed = (val?: number | null): string => {
+    if (val === undefined || val === null || isNaN(val)) return '--';
+    return `${Number(val).toFixed(1)} km/h`;
+  };
+
+  const renderDeltaBadge = (delta?: number | null, faster?: string) => {
+    if (delta === undefined || delta === null || isNaN(delta)) {
+      return <span className="text-[#94A3B8]">--</span>;
+    }
     const isZero = Math.abs(delta) < 0.001;
     if (isZero) return <span className="text-[#94A3B8]">EVEN</span>;
     return (
       <span className="font-bold text-[#38BDF8]">
-        {faster} -{Math.abs(delta).toFixed(3)}s
+        {faster || ''} -{Math.abs(delta).toFixed(3)}s
       </span>
     );
   };
@@ -46,9 +67,12 @@ export function SectorSummaryBar({ chart }: SectorSummaryBarProps) {
             Official Sector Splits & Speed Trap Summary
           </span>
         </div>
-        {lapTimes && (
+        {lapTimes && lapTimes.delta_s != null && (
           <div className="text-[11px] text-[#94A3B8]">
-            Finish Delta: <span className="font-bold text-emerald-400">{lapTimes.faster} -{Math.abs(lapTimes.delta_s).toFixed(3)}s</span>
+            Finish Delta:{' '}
+            <span className="font-bold text-emerald-400">
+              {lapTimes.faster || ''} -{Math.abs(lapTimes.delta_s).toFixed(3)}s
+            </span>
           </div>
         )}
       </div>
@@ -62,8 +86,8 @@ export function SectorSummaryBar({ chart }: SectorSummaryBarProps) {
               {renderDeltaBadge(s1.delta_s, s1.faster)}
             </div>
             <div className="flex items-center justify-between text-[11px] text-[#E2E8F0]">
-              <span>{drvA}: {s1.driver_a.toFixed(3)}s</span>
-              <span>{drvB}: {s1.driver_b.toFixed(3)}s</span>
+              <span>{drvA}: {fmtTime(s1.driver_a)}</span>
+              <span>{drvB}: {fmtTime(s1.driver_b)}</span>
             </div>
           </div>
         )}
@@ -76,8 +100,8 @@ export function SectorSummaryBar({ chart }: SectorSummaryBarProps) {
               {renderDeltaBadge(s2.delta_s, s2.faster)}
             </div>
             <div className="flex items-center justify-between text-[11px] text-[#E2E8F0]">
-              <span>{drvA}: {s2.driver_a.toFixed(3)}s</span>
-              <span>{drvB}: {s2.driver_b.toFixed(3)}s</span>
+              <span>{drvA}: {fmtTime(s2.driver_a)}</span>
+              <span>{drvB}: {fmtTime(s2.driver_b)}</span>
             </div>
           </div>
         )}
@@ -90,8 +114,8 @@ export function SectorSummaryBar({ chart }: SectorSummaryBarProps) {
               {renderDeltaBadge(s3.delta_s, s3.faster)}
             </div>
             <div className="flex items-center justify-between text-[11px] text-[#E2E8F0]">
-              <span>{drvA}: {s3.driver_a.toFixed(3)}s</span>
-              <span>{drvB}: {s3.driver_b.toFixed(3)}s</span>
+              <span>{drvA}: {fmtTime(s3.driver_a)}</span>
+              <span>{drvB}: {fmtTime(s3.driver_b)}</span>
             </div>
           </div>
         )}
@@ -105,12 +129,14 @@ export function SectorSummaryBar({ chart }: SectorSummaryBarProps) {
                 <span>SPEED TRAP</span>
               </span>
               <span className="font-bold text-amber-400">
-                {speedTrap.delta_kph > 0 ? `+${speedTrap.delta_kph.toFixed(1)}` : speedTrap.delta_kph.toFixed(1)} km/h
+                {speedTrap.delta_kph != null
+                  ? `${speedTrap.delta_kph > 0 ? `+${speedTrap.delta_kph.toFixed(1)}` : speedTrap.delta_kph.toFixed(1)} km/h`
+                  : '--'}
               </span>
             </div>
             <div className="flex items-center justify-between text-[11px] text-[#E2E8F0]">
-              <span>{drvA}: {speedTrap.driver_a} km/h</span>
-              <span>{drvB}: {speedTrap.driver_b} km/h</span>
+              <span>{drvA}: {fmtSpeed(speedTrap.driver_a)}</span>
+              <span>{drvB}: {fmtSpeed(speedTrap.driver_b)}</span>
             </div>
           </div>
         )}

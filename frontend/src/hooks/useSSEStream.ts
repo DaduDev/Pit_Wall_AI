@@ -35,6 +35,9 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
 
       setMessages((prev) => [...prev, userMsg]);
       setIsStreaming(true);
+      setCurrentChart(null);
+      setCurrentMinimap(null);
+      setCurrentTrace(null);
       setCurrentStatus('Initializing connection to Pit Wall...');
 
       const assistantMsgId = `ast_${Date.now()}`;
@@ -138,17 +141,18 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
 
                 case 'chart':
                   if (data.spec) {
+                    const resolvedMeta = data.metadata || data.spec.metadata || {};
                     if (data.chart_type === 'track_minimap') {
                       setCurrentMinimap({
                         ...data.spec,
                         chart_type: data.chart_type,
-                        metadata: data.metadata,
+                        metadata: resolvedMeta,
                       });
                     } else {
                       setCurrentChart({
                         ...data.spec,
                         chart_type: data.chart_type,
-                        metadata: data.metadata,
+                        metadata: resolvedMeta,
                       });
                       if (data.chart_type !== 'corner_comparison') {
                         setCurrentMinimap(null);

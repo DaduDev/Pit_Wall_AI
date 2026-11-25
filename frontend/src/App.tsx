@@ -4,6 +4,7 @@ import { useSSEStream } from './hooks/useSSEStream';
 import { LoginPage } from './components/Auth/LoginPage';
 import { ChatPanel } from './components/ChatPanel/ChatPanel';
 import { ChartStage } from './components/ChartStage/ChartStage';
+import { ErrorBoundary } from './components/ErrorBoundary/ErrorBoundary';
 
 export default function App() {
   const { user, token, isAuthenticated, isLoading, error, login, logout } = useAuth();
@@ -80,7 +81,9 @@ export default function App() {
 
         {/* Right Panel: Plotly Telemetry Stage & Trace Drawer (60% width) */}
         <section className="flex flex-1 flex-col overflow-hidden">
-          <ChartStage chart={currentChart} minimap={currentMinimap} trace={currentTrace} />
+          <ErrorBoundary fallbackTitle="Telemetry & Visual Analytics Stage Error">
+            <ChartStage chart={currentChart} minimap={currentMinimap} trace={currentTrace} />
+          </ErrorBoundary>
         </section>
       </main>
     </div>

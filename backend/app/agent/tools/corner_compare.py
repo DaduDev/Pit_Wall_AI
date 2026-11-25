@@ -28,6 +28,7 @@ from backend.app.charts.telemetry_charts import (
     build_corner_comparison_figure,
     build_corner_minimap_figure,
 )
+from backend.app.charts.plotly_theme import resolve_team_color, get_driver_trace_styles
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,45 @@ def compare_corner_telemetry(
         corner_info=corner_info,
     )
 
+    color_1 = resolve_team_color(meta_a.get("team", code_1))
+    color_2 = resolve_team_color(meta_b.get("team", code_2))
+    style_1, style_2 = get_driver_trace_styles(color_1, color_2)
+
+    corner_nick = corner_info.get("nickname") or f"Turn {corner_info.get('turn_number', '')}"
+    turn_num = corner_info.get("turn_number")
+    mode_label = f"{corner_nick} • Turn {turn_num}" if turn_num and str(turn_num) not in corner_nick else corner_nick
+
+    standardized_drivers = [
+        {
+            "code": code_1,
+            "name": meta_a.get("team", code_1),
+            "color": style_1["color"],
+            "compound": meta_a.get("compound"),
+        },
+        {
+            "code": code_2,
+            "name": meta_b.get("team", code_2),
+            "color": style_2["color"],
+            "compound": meta_b.get("compound"),
+        },
+    ]
+
+    standardized_metadata = {
+        "domain": "telemetry",
+        "year": year,
+        "grand_prix": meta_a.get("event_name", grand_prix),
+        "session_name": session_type,
+        "mode_label": mode_label,
+        "drivers": standardized_drivers,
+        "track_status": "DRY",
+        "event_name": meta_a.get("event_name", grand_prix),
+        "session_type": session_type,
+        "turn_number": turn_num,
+        "corner_nickname": corner_info.get("nickname"),
+    }
+    fig_comparison["metadata"] = standardized_metadata
+    fig_minimap["metadata"] = standardized_metadata
+
     exec_time_ms = round((time.perf_counter() - t_start) * 1000, 2)
 
     # 9. Engineering Trace Payload
@@ -257,11 +297,13 @@ def compare_corner_telemetry(
         "chart": {
             "chart_type": "corner_comparison",
             "spec": fig_comparison,
+            "metadata": standardized_metadata,
             "caption": f"Telemetry Comparison: {code_1} vs {code_2} — {corner_info.get('nickname', '')}",
         },
         "minimap": {
             "chart_type": "track_minimap",
             "spec": fig_minimap,
+            "metadata": standardized_metadata,
             "caption": f"GPS Track Mini-Map — {corner_info.get('nickname', '')}",
         },
         "trace": trace_payload,

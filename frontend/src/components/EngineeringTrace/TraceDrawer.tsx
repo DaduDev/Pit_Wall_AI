@@ -14,8 +14,11 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
     return null;
   }
 
-  const isTelemetry = trace.data_domain === 'telemetry' || !!trace.telemetry_params;
-  const params = trace.telemetry_params;
+  const isTelemetry =
+    trace.data_domain === 'telemetry' ||
+    !!trace.telemetry_params ||
+    !!(trace as any).strategy_params;
+  const params = trace.telemetry_params || (trace as any).strategy_params;
 
   const handleCopy = () => {
     const textToCopy = trace.query || (params ? JSON.stringify(params, null, 2) : '');
@@ -64,7 +67,18 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
               <span className="text-[10px] text-[#64748B] block">
                 {isTelemetry ? 'SAMPLES / ROWS' : 'ROW COUNT'}
               </span>
-              <span className="text-white font-medium">{trace.row_count ?? 'N/A'}</span>
+              <span className="text-white font-medium">
+                {trace.row_count !== undefined
+                  ? trace.row_count
+                  : params?.clean_lap_counts
+                  ? (Object.values(params.clean_lap_counts) as number[]).reduce(
+                      (a: number, b: number) => a + b,
+                      0
+                    )
+                  : trace.interpolated_points !== undefined
+                  ? trace.interpolated_points
+                  : 'N/A'}
+              </span>
             </div>
             <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
               <span className="text-[10px] text-[#64748B] block">CONFIDENCE</span>
@@ -111,6 +125,39 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
                   </span>
                 </div>
               )}
+              {params.stint_counts && (
+                <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
+                  <span className="text-[10px] text-[#64748B] block">STINTS</span>
+                  <span className="text-emerald-400 font-medium">
+                    {Object.entries(params.stint_counts)
+                      .map(([d, s]) => `${d}: ${s}S`)
+                      .join(' | ')}
+                  </span>
+                </div>
+              )}
+              {params.clean_lap_counts && (
+                <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
+                  <span className="text-[10px] text-[#64748B] block">CLEAN LAPS</span>
+                  <span className="text-amber-400 font-medium">
+                    {Object.entries(params.clean_lap_counts)
+                      .map(([d, c]) => {
+                        const out = params.excluded_lap_counts ? params.excluded_lap_counts[d] : undefined;
+                        return out !== undefined ? `${d}: ${c}L (${out} filtered)` : `${d}: ${c}L`;
+                      })
+                      .join(' | ')}
+                  </span>
+                </div>
+              )}
+              {params.pit_stop_laps && (
+                <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
+                  <span className="text-[10px] text-[#64748B] block">PIT LAPS</span>
+                  <span className="text-rose-400 font-medium">
+                    {Object.entries(params.pit_stop_laps)
+                      .map(([d, p]) => `${d}: L${(p as number[]).join(',')}`)
+                      .join(' | ')}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -137,7 +184,9 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
             <div>
               <div className="flex items-center justify-between pb-1 text-[#94A3B8]">
                 <span className="text-[10px] uppercase tracking-wider text-[#64748B]">
-                  Ground-Truth Telemetry Trace Parameters:
+                  {trace.strategy_params || (params && params.stint_counts)
+                    ? 'Ground-Truth Tyre Stint & Strategy Parameters:'
+                    : 'Ground-Truth Telemetry Trace Parameters:'}
                 </span>
                 <button
                   onClick={handleCopy}
