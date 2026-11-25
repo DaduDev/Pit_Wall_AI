@@ -1,0 +1,415 @@
+/speckit-constitution PitWall AI must enforce zero-hallucination math: the LLM must never calculate stats, averages, braking points, or lap deltas from memory—every number must come from DuckDB SQL or deterministic Python/NumPy telemetry calculations. Keep a strict boundary between historical SQL data (1950–2024+) and FastF1 car telemetry (2018+). Use official F1 team colors on a dark telemetry HUD (#0B0F17), always display the exact session/lap metadata and underlying SQL or telemetry trace in the UI, and verify every feature with automated pytest suites against real race data.
+
+---
+
+/speckit-specify Build PitWall AI, an AI Race Engineer web app that answers natural-language Formula 1 questions from 1950 to 2024+ with interactive visualizations.
+
+Core capabilities:
+1. Corner-by-Corner Telemetry Comparison (2018+): Compare any two drivers through a specific corner (by turn number or famous nickname like Copse, Eau Rouge, Maggotts-Becketts, 130R, Parabolica). Default to Qualifying fastest laps when unspecified. Slice entry-apex-exit (+/- 200m), compute braking point delta, apex min speed, lowest gear, full-throttle pickup point, and corner time delta. Render a synchronized multi-panel interactive chart (Speed, Delta, Throttle, Brake, Gear) plus a zoomed GPS track mini-map colored by faster driver, paired with grounded race-engineer commentary.
+2. Full-Lap & Race Strategy Analytics (2018+): Full-lap telemetry overlays, tyre stint degradation (filtering out pit and Safety Car laps), and race position evolution.
+3. Historical Archive Analytics (1950–2024): Answer any career, season, driver, constructor, pit stop, or circuit stat question with an interactive chart/table and the exact SQL query executed.
+4. Ad-Hoc Analysis: Handle custom cross-metric questions not covered by preset charts via safe Python analytics that still return interactive charts.
+5. Transparency & Live Progress: Stream step-by-step tool status while loading data, gracefully explain the 2018 boundary if someone asks for older car telemetry, and show a collapsible Engineering Trace panel with the SQL query or telemetry parameters used.
+6. Winner Prediction: Based on recent form of teams and drivers, shall predict the driver who can win in the particular circuit and have a good scope on the championship title.
+
+---
+
+/speckit-clarify
+
+---
+
+A
+
+---
+
+C — Multi-turn within a session (rolling summary + last 4–6 turns verbatim), stateless across sessions.
+
+---
+
+B
+
+---
+
+C — Cache-first fallback (plus a quick 1–2 retries on transient timeouts before failing if uncached).
+
+---
+
+yes
+
+---
+
+/speckit-plan Use:
+- Backend: Python 3.12+, FastAPI with SSE streaming (/api/chat/stream), Google ADK (google-adk) using gemini-3.8-flash for the orchestrator agent and tool routing, DuckDB for 1950–2024 Kaggle CSV ingestion (normalizing \N to NULL) with curated read-only SQL views (v_race_results, v_qualifying, v_pit_stops, v_driver_standings), FastF1 with persistent disk cache (./data/fastf1_cache) + NumPy 1-meter distance interpolation for corner slicing, and Plotly JSON builders for Tier 1 charts plus a timeout-guarded Python sandbox for Tier 2 ad-hoc Plotly charts.
+- Entity Resolution: Fuzzy driver/circuit resolver plus a curated data/corner_nicknames.json mapping iconic corner nicknames across F1 circuits to FastF1 turn numbers.
+- Frontend: React + TypeScript + Vite + Tailwind CSS + react-plotly.js in a dark F1 pit-wall layout (chat + preset prompts on the left, interactive Plotly stage + collapsible Engineering Trace drawer on the right).
+- Testing: Pytest suite verifying DuckDB \N ingestion, read-only SQL guardrails, corner-slicing math on a cached 2024 British GP Qualifying fixture, and a Playwright smoke test confirming Plotly charts render with zero console errors.
+
+---
+
+Inspect plan.md, research.md, data-model.md, contracts/api-contracts.md, and quickstart.md to confirm none were cut off, and finish any remaining /speckit-plan wrap-up steps (like updating the agent context file). Do not spawn subagents.
+
+---
+
+/speckit-clarify
+
+---
+
+/speckit-tasks
+
+---
+
+/speckit-analyze
+
+---
+
+Apply all 5 remediations from the Specification Analysis Report sequentially without spawning parallel subagents:
+
+1. [I1 — Primary Gemini + Local Ollama Fallback] Update specs/001-pitwall-ai/plan.md, specs/001-pitwall-ai/tasks.md (T022), and AGENTS.md to configure the ADK orchestrator as follows:
+   - Primary LLM: `gemini-3.5-flash-lite` via Google AI Studio (`GOOGLE_API_KEY`). Set `thinking_level="low"` (or `"medium"` for complex queries) so multi-step tool calling does not terminate early, and do NOT pass deprecated `temperature`, `top_p`, or `top_k` parameters.
+   - Automatic & Manual Fallback LLM: Local Ollama via Google ADK `LiteLlm(model="ollama_chat/<OLLAMA_MODEL>")` (default `OLLAMA_MODEL=qwen3.5:4b`, `OLLAMA_API_BASE=http://localhost:11434`). Use `ollama_chat/` (never `ollama/`) to avoid tool-calling loops. Automatically fall back to Ollama if Gemini returns HTTP 429/503 after retry, or force Ollama directly via `.env` (`LLM_PROVIDER=ollama`) for offline dev. When falling back to Ollama, trim conversation context to the last 2 turns so it fits comfortably within 8GB RAM.
+   - Concurrency & Quota Protection: Wrap Gemini calls with an `asyncio.Semaphore(3)` + brief exponential backoff, keep ADK tools coarse-grained (target <=2 LLM calls per user question), and add an in-memory/SQLite response cache for repeat and preset prompts.
+
+2. [C1 — Coverage Gap] Expand tasks.md (T006) to explicitly cite `constructor_standings` (`constructorStandingsId`) and all mandatory NOT NULL / FK columns from data-model.md (`circuits.name`, `constructors.name`, `drivers.forename`, `races.round`, `races.name`, `races.date`, `results.points`, `results.laps`).
+
+3. [U1 — Missing View] Add a curated `v_constructor_standings` view definition to specs/001-pitwall-ai/data-model.md and include it in `backend/app/data/views.py` in tasks.md (T007) alongside `v_driver_standings`.
+
+4. [A1 & D1 — Spec Cleanup] In specs/001-pitwall-ai/spec.md, update FR-020 from "track coordinates" to "track distance (meters) and turn number", and fold FR-021 (±200m entry-apex-exit window) directly into FR-004.
+
+Summarize the exact changes made and stop so I can review before starting Phase 1 implementation.
+
+---
+
+/speckit-implement Execute Phase 1 (Setup) and Phase 2 (Foundational) only from specs/001-pitwall-ai/tasks.md sequentially without spawning parallel subagents.
+
+Requirements for this run:
+- Verify DuckDB ingestion (T006) and all 5 curated views including v_constructor_standings (T007) directly against the real CSVs in ./data/kaggle/ (confirming \N -> NULL conversion and zero ingestion errors).
+- Run pytest on all Phase 1–2 tests and confirm they pass before finishing.
+- Mark completed tasks as [X] in tasks.md, summarize what was built and tested, and stop for my review before starting Phase 3 (User Story 1).
+
+---
+
+/speckit-implement Execute Phase 3 (User Story 1: Historical F1 Question Answering MVP, tasks T017–T027) only from specs/001-pitwall-ai/tasks.md sequentially without spawning parallel subagents.
+
+Guardrails for this phase:
+- Confirm `google-adk` and `google-genai` are listed in backend/requirements.txt and installed in the venv.
+- In T022 (ADK Orchestrator), configure `gemini-3.5-flash-lite` with `thinking_level="low"` (never pass `thinking_budget`, `temperature`, `top_p`, `top_k`, `frequency_penalty`, or `presence_penalty`—they error or are deprecated on 3.5-flash-lite).
+- For the Ollama fallback, use `LiteLlm(model="ollama_chat/<OLLAMA_MODEL>")` (never `ollama/`), trim conversation history to the last 2 turns on fallback, and guard concurrent Gemini calls with `asyncio.Semaphore(3)` + brief backoff + response caching.
+- Keep SQL tools coarse-grained so a standard historical query completes in <=2 LLM calls and streams `status`, `text`, `chart`, `trace`, and `done` SSE frames cleanly.
+- Run `python -m pytest backend/tests/ -v` and verify the frontend builds cleanly (`npm install && npm run build` inside `frontend/`).
+- Mark completed tasks T017–T027 as [X] in tasks.md, summarize what was built and verified, and stop for my review before starting Phase 4.
+
+---
+
+Let me test this now, shall I?
+
+---
+
+Fix two sets of bugs discovered during live testing of Phase 3 (sequentially, no subagents):
+
+1. Historical SQL Prompt & View Rules (backend/app/agent/ or SQL tool instructions):
+   - Always select a single `forename || ' ' || surname AS driver_name` label column (never rely on `driver_code` as the primary label since pre-2004 drivers have NULL codes) and group by `driver_id` (plus name columns).
+   - For any "race starts" or "win percentage" query, instruct the SQL agent to use `COUNT(DISTINCT race_id)` (and `COUNT(DISTINCT CASE WHEN position = 1 THEN race_id END)` for wins) to prevent double-counting 1950s shared drives, and filter out non-starts (`status NOT IN ('Did not qualify', 'Did not prequalify', 'Did not start', 'Withdrew')`).
+   - Add a sensible `LIMIT 15` (with secondary tie-breaker sorting like `wins DESC`) for leaderboard/ranking queries unless the user asks for the full table.
+
+2. Auto-Chart Builder (backend/app/charts/):
+   - Never select a column containing NULLs (`driver_code`) as the category/X-axis when a full name column (`driver_name`, `constructor`, `circuit`, or combined `forename`/`surname`) exists; filter or coalesce any fallback NULL labels cleanly so Plotly never stacks multiple entities under `"None"`.
+   - Pick the Y/value metric intelligently: prefer the column referenced in the SQL `ORDER BY` clause (or matching metric keywords like `percentage`, `rate`, `wins`, `points`, `avg`) rather than blindly grabbing the first numeric column (`total_starts`).
+   - For driver/team ranking bar charts, render a horizontal bar chart (`orientation="h"`, sorted top-to-bottom), cap display to top 12–15 entries, format labels cleanly outside the bars (`textposition="outside"`, e.g. `42.9%` with hover tooltip showing `wins / total_starts`), and avoid vertical text rotation.
+
+3. Add a pytest regression test using the Monza >=5 starts query asserting that:
+   - Juan Manuel Fangio ranks #1 (3 wins / 7 distinct starts = 42.86%), ahead of Juan Pablo Montoya (40.0%) and Alberto Ascari (40.0%).
+   - The generated Plotly JSON uses `driver_name` (no `"None"` labels) and plots `win_percentage` (not `total_starts`).
+
+Run `python -m pytest backend/tests/ -v` to confirm everything passes, then summarize the changes.
+
+---
+
+Fix two UX issues found during Phase 3 live testing sequentially without spawning subagents:
+
+1. Frontend Markdown Rendering (frontend/):
+   - Install `react-markdown` and `remark-gfm` in `frontend/`.
+   - Update the chat message renderer so assistant responses render full GFM Markdown (bold, lists, inline code, tables) with clean dark-HUD Tailwind component overrides (crisp white bold text `#F8FAFC`, compact bullet/list spacing, dark bordered tables, no raw `**` asterisks ever visible).
+
+2. Live Token Streaming & Tighter Engineer Narration (backend/ + frontend/):
+   - Keep the fast `chart` and `trace` SSE frames firing immediately after DuckDB/tool execution (do NOT delay chart rendering).
+   - Emit an immediate status update (`"Data plotted — Engineer analyzing results..."`) right after the chart event, and stream the LLM's final commentary incrementally via SSE `text` delta chunks (using ADK streaming / async chunk yielding) so the chat bubble begins typing right away instead of buffering until completion.
+   - Update the frontend SSE client to append incoming `text` deltas smoothly into the active assistant bubble with a subtle streaming indicator until `done`.
+   - Refine the PitWall Engineer system prompt: when a chart is already plotted, deliver concise, high-signal race-engineer analysis (totals, peaks, trends, key outliers in 2–4 sentences) instead of redundantly listing every single bar/row already visible in the chart; keep authentic F1 radio tone without awkward misused slang like "box this data".
+
+Verify with `python -m pytest backend/tests/ -v` and `npm run build` inside `frontend/`, then summarize the changes.
+
+---
+
+/speckit-implement Execute Phase 4 (User Story 2: Corner-by-Corner Telemetry Comparison, tasks T028–T040) only from specs/001-pitwall-ai/tasks.md sequentially without spawning parallel subagents.
+
+Technical guardrails for FastF1 & Telemetry accuracy:
+1. Coarse-Grained Tool Design: Expose a single coarse-grained ADK tool (`compare_corner_telemetry`) that resolves drivers/circuit/corner, loads cached FastF1 laps (defaulting to Qualifying fastest laps when unspecified), slices ±200m around the corner apex distance, computes all 5 metrics, builds both Plotly figures, and returns structured metrics + chart JSON + trace metadata in ONE tool call (keeping total LLM calls <= 2 per turn).
+2. FastF1 Channel & Interpolation Correctness:
+   - Use `lap.get_telemetry()` so car channels (`Speed`, `Throttle`, `Brake`, `nGear`) and GPS (`X`, `Y`) share aligned `Distance` and `Time`.
+   - Convert `Brake` explicitly to numeric `0`/`100` (FastF1 often returns booleans `True`/`False`, which break `np.interp` or plot awkwardly).
+   - Interpolate both drivers onto an identical 1-meter distance grid across `[max(0, apex_dist - 200), min(lap_len, apex_dist + 200)]`.
+   - Zero the corner time delta at the start of the slice (`(t_B(d) - t_B(d_0)) - (t_A(d) - t_A(d_0))` or distance integration `1/v`), so the delta trace starts cleanly at `0.000s` at corner entry.
+3. Visual Polish & Teammate Collision Handling:
+   - Synchronized 5-panel Plotly chart (`Speed` km/h, `Corner Delta` s, `Throttle` %, `Brake`, `Gear`) sharing a single distance X-axis (`shared_xaxes=True`) with a vertical dashed apex marker line and explicit subtitle (`Year GP | Session | Driver A Lap X vs Driver B Lap Y | Turn N (Nickname)`).
+   - Zoomed GPS Corner Mini-Map: lock equal aspect ratio (`yaxis=dict(scaleanchor="x", scaleratio=1)`), hide axis ticks/grids, and color mini-segments by which driver is faster through each segment, with entry/apex/exit markers.
+   - If comparing two teammates (same official team hex color), automatically distinguish Driver 2 with a dashed line and high-contrast secondary accent color.
+4. Real-Data Verification:
+   - Run pytest including the cached 2024 British GP Qualifying (`VER` vs `NOR` through Copse / Turn 9) fixture test (allow ~30s on first run to populate `./data/fastf1_cache/`).
+   - Run `npm run build` in `frontend/` to confirm the new dual-chart + metadata header + Engineering Trace layout compiles cleanly.
+
+Mark completed Phase 4 tasks as [X] in tasks.md, summarize what was built and verified, and stop for my review before starting Phase 5.
+
+---
+
+I'm confused here:
+otAvailableError: No data for this session! If this session only finished recently, please try again in a few minutes.
+
+---
+
+See this log of backend, I don't understand which account it is asking me for:
+PS D:\Learning\F1_Tracker\f1-race-engineer> python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
+INFO:     Will watch for changes in these directories: ['D:\\Learning\\F1_Tracker\\f1-race-engineer']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [13028] using StatReload
+INFO:     Started server process [%d]
+INFO:     Waiting for application startup.
+INFO:pitwall.main:Starting up PitWall AI backend...
+C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\req.py:251: FutureWarning: `.enable_cache` is deprecated and will be removed in a future version. Use `.configure` instead.
+  warnings.warn("`.enable_cache` is deprecated and will be removed in a "
+INFO:backend.app.data.fastf1_cache:FastF1 cache enabled at D:\Learning\F1_Tracker\f1-race-engineer\data\fastf1_cache
+INFO:pitwall.main:Verified 5 curated SQL views.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:52934 - "POST /api/chat/stream HTTP/1.1" 200 OK
+C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\req.py:251: FutureWarning: `.enable_cache` is deprecated and will be removed in a future version. Use `.configure` instead.
+  warnings.warn("`.enable_cache` is deprecated and will be removed in a "
+INFO:backend.app.data.fastf1_cache:FastF1 cache enabled at D:\Learning\F1_Tracker\f1-race-engineer\data\fastf1_cache
+INFO:backend.app.data.fastf1_cache:FastF1 cache enabled at D:\Learning\F1_Tracker\f1-race-engineer\data\fastf1_cache
+core           INFO     Loading data for British Grand Prix - Qualifying [v3.9.2]
+INFO:fastf1.fastf1.core:Loading data for British Grand Prix - Qualifying [v3.9.2]
+req            INFO     No cached data found for session_info. Loading data...
+INFO:fastf1.fastf1.req:No cached data found for session_info. Loading data...
+_api           INFO     Fetching session info data...
+INFO:fastf1.api:Fetching session info data...
+tokens         INFO     Signing in to Formula 1 account...
+INFO:fastf1.f1account:Signing in to Formula 1 account...
+F1 account email: demo@pitwall.ai
+C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\getpass.py:99: GetPassWarning: Can not control echo on the terminal.
+  return fallback_getpass(prompt, stream)
+Warning: Password input may be echoed.
+F1 account password: REDACTED
+transport    WARNING    Failed to authenticate with Formula 1 account, continuing without authentication: There was a problem with your password or email address. Please check your details and try again.
+WARNING:fastf1.fastf1.internals.f1account.transport:Failed to authenticate with Formula 1 account, continuing without authentication: There was a problem with your password or email address. Please check your details and try again.
+DEBUG:fastf1.fastf1.req:Falling back to https://livetiming-mirror.fastf1.dev/static/2024/2024-07-07_British_Grand_Prix/2024-07-06_Qualifying/SessionInfo.jsonStream
+logger      WARNING     Failed to load session info data!
+WARNING:fastf1.fastf1.core:Failed to load session info data!
+DEBUG:fastf1.fastf1.core:Traceback for failure in session info data
+Traceback (most recent call last):
+  File "C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\logger.py", line 112, in __wrapped
+    return func(*args, **kwargs)
+  File "C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\core.py", line 1457, in _load_session_info
+    self._session_info = api.session_info(self.api_path,
+                         ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+                                          livedata=livedata)
+                                          ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\req.py", line 611, in _cached_api_request
+    data = func(api_path, **func_kwargs)
+  File "C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\_api.py", line 1750, in session_info
+    raise SessionNotAvailableError(
+    ...<2 lines>...
+    )
+fastf1._api.SessionNotAvailableError: No data for this session! If this session only finished recently, please try again in a few minutes.
+req            INFO     No cached data found for driver_info. Loading data...
+INFO:fastf1.fastf1.req:No cached data found for driver_info. Loading data...
+_api           INFO     Fetching driver list...
+INFO:fastf1.api:Fetching driver list...
+tokens         INFO     Signing in to Formula 1 account...
+INFO:fastf1.f1account:Signing in to Formula 1 account...
+F1 account email:
+
+---
+
+Replace FastF1 live network fetches with the free, unauthenticated OpenF1 REST API (`https://api.openf1.org/v1/`) as our primary telemetry provider (sequentially, no subagents), since Formula 1 paywalled FastF1's static archive behind F1TV Access in October 2026:
+
+1. OpenF1 Client + Persistent Disk Cache (`backend/app/data/openf1_client.py`):
+   - Use `httpx` with a local persistent JSON/Parquet cache in `./data/openf1_cache/` and a lightweight rate-limiter (<= 2.5 req/sec, retry with backoff on 429) so cached sessions load instantaneously and never trip OpenF1's 3 req/s, 30 req/min free-tier cap.
+   - Support fetching `sessions`, `drivers`, `laps`, `car_data` (speed, throttle, brake, n_gear, rpm, drs), `location` (x, y, z), `stints`, `position`, and `pit` for any historical session from 2023 onward with zero authentication.
+   - Align `car_data` and `location` by timestamp (`pd.merge_asof` on UTC `date`), compute cumulative `Distance` along the lap by integrating `speed` over `dt` (and normalize to circuit lap length), and keep our existing 1-meter `np.interp` corner-slicing math and `data/corner_nicknames.json` untouched.
+   - Keep official team colors directly from OpenF1's `drivers.team_colour` field (with our existing teammate collision dashed-line / secondary-color handling).
+
+2. Clean Era Boundary & Optional Fallback:
+   - Update the telemetry boundary message (FR-013) to explain that free live car telemetry covers **2023–present** via OpenF1 (while DuckDB covers 1950–2024 historical results/qualifying), unless the user optionally provides FastF1/local cached data for 2018–2022.
+   - Keep the existing `fixture_2024_silverstone_q.json` only as an offline pytest/fallback fixture, NOT as the sole working session.
+
+3. Verification:
+   - Add a pytest integration test verifying real OpenF1 retrieval + caching for a 2024 session (e.g., 2024 British GP Qualifying `VER` vs `NOR` through Copse AND a second circuit like 2024 Belgian GP / Spa or Italian GP / Monza to prove it works dynamically across circuits without any F1 account).
+   - Run `python -m pytest backend/tests/ -v` and confirm all tests pass.
+
+Summarize the changes and stop for my review before Phase 5.
+
+---
+
+Fix four critical bugs exposed during live testing (sequentially, no subagents):
+
+1. Remove Silent Fixture Fallback & Enforce Real OpenF1 Telemetry (`backend/app/data/` & telemetry tools):
+   - NEVER fall back to `fixture_2024_silverstone_q.json` inside production request paths. Keep fixtures strictly inside `backend/tests/` for offline pytest runs only.
+   - Ensure live telemetry uses the free, unauthenticated OpenF1 REST API (`https://api.openf1.org/v1/`) with lazy local disk caching in `./data/openf1_cache/` (filtering `car_data` and `location` by `date>`/`date<` around the target lap, respecting <=2.5 req/s rate limiting).
+   - Enforce the era boundary BEFORE fetching telemetry: if the requested year is `< 2023` (e.g., 2021 Brazil GP), immediately return a clear structured response explaining that car sensor telemetry is available for 2023–present via OpenF1 and offer a lap-by-lap pace comparison from DuckDB (`lap_times`) instead—never substitute a different race or year.
+   - If a 2023+ session or corner fails to load, return an honest error explaining what failed rather than silently plotting Silverstone 2024.
+
+2. Fix Multi-Turn Context & Kill Phantom Default SQL Queries (`backend/app/agent/orchestrator.py` & `backend/app/chat/session.py`):
+   - Inspect why short follow-ups ("Tell me who was faster in all the turns", "What about Suzuka") lost prior turn context and returned unrelated queries (all-time pole positions, 2023 Abu Dhabi Round 22).
+   - Pass the active session's recent turns AND structured last-query entities (`last_year`, `last_circuit`, `last_drivers`, `last_tool`) directly into the ADK agent prompt so follow-ups like "What about Suzuka?" inherit the active drivers/year/comparison type automatically.
+   - Remove any hardcoded/default fallback SQL query (e.g., Abu Dhabi 2023 or all-time poles) that runs when routing fails. If a query asks for something not yet supported or genuinely ambiguous, state that clearly or ask one clarifying question.
+
+3. Fix Circuit/GP Alias Resolution & Zero-Row Self-Correction (`backend/app/data/views.py`, `entity_resolver.py`, SQL tool):
+   - Expose `circuit_country` and `circuit_location` on `v_race_results` and `v_qualifying` so filtering `circuit_country = 'Brazil'` matches both "Brazilian Grand Prix" (pre-2021) and "São Paulo Grand Prix" (2021–2024).
+   - Add a GP/circuit alias map in `entity_resolver.py` (Brazil/Interlagos -> Autódromo José Carlos Pace / Brazil; Suzuka -> Japanese Grand Prix; Monza -> Italian Grand Prix; Imola -> Emilia Romagna; Spa -> Belgian Grand Prix; Silverstone -> British Grand Prix).
+   - If a SQL query returns 0 rows, allow ONE automatic self-correction retry inside the same turn (checking `circuit_country`/`circuit_location` or fuzzy circuit name). Forbid the assistant from ever outputting "Stand by, I'll adjust the query" without actually executing a tool call.
+
+4. Regression Tests (`backend/tests/`):
+   - Test that `Compare Verstappen and Hamilton through Turn 9 at 2021 Brazil GP` returns a 2023 telemetry boundary message (and NEVER mentions Silverstone or 2024).
+   - Test that `Brazil 2021` SQL queries match the 2021 São Paulo Grand Prix and return Hamilton P1 / Verstappen P2 + lap-time stats.
+   - Test a real cached OpenF1 corner comparison on a non-Silverstone heavy-braking corner (e.g., 2024 Italian GP Qualifying Turn 1 / Monza or 2024 Belgian GP Qualifying Turn 1 / La Source) proving dynamic OpenF1 telemetry works end-to-end with real braking/gear traces.
+   - Test multi-turn follow-up resolution ("Compare Verstappen and Norris at Silverstone 2024" -> "What about Suzuka?") verifies Suzuka/Japan is queried rather than Abu Dhabi 2023.
+
+Run `python -m pytest backend/tests/ -v` and summarize the exact root causes found and fixed.
+
+---
+
+/speckit-implement Execute Phase 5 (User Story 3: Full-Lap Telemetry Overlay, tasks T041–T048) only from specs/001-pitwall-ai/tasks.md sequentially without spawning parallel subagents.
+
+Technical guardrails for Phase 5:
+1. Reuse OpenF1 Client + Local Cache (NO FastF1 live calls, NO silent Silverstone fallback):
+   - Fetch full-lap `laps` + `car_data` via `backend/app/data/openf1_client.py` (2023–present). Enforce the strict 2023 boundary if an older year is requested.
+   - Pull sector times (`duration_sector_1`, `duration_sector_2`, `duration_sector_3`), intermediate speeds (`i1_speed`, `i2_speed`), speed trap (`st_speed`), and `lap_duration` directly from OpenF1 `laps` so the engineer commentary and summary strip cite exact official splits.
+   - Ignore `is_pit_out_lap=True` and null `lap_duration` laps when selecting each driver's fastest lap.
+2. Full-Lap Alignment & Coarse-Grained Tool:
+   - Expose a single coarse-grained ADK tool (`compare_full_lap_telemetry`) keeping each turn to <= 2 LLM calls.
+   - Align both drivers' full-lap `car_data` onto a common distance grid (normalized 0 -> 100% or 5-meter intervals across circuit distance) and compute a cumulative lap time delta trace starting at `0.000s` at the start/finish line and matching the exact official `lap_duration` delta at lap end.
+   - Return structured metrics: total lap time & delta, Sector 1/2/3 deltas, top speed / speed-trap delta, % of lap at full throttle (`>= 98%`), and % of lap under braking.
+3. Broadcast-Grade Plotly Visuals:
+   - Synchronized multi-panel dark HUD (`#0B0F17`) chart: **Speed (km/h)**, **Cumulative Time Delta (s)**, **Throttle (%) & Brake**, and **Gear (1–8)** sharing the distance X-axis, with vertical dashed Sector 1 / Sector 2 boundary markers and official driver/team colors (handling teammate color collisions with dashed lines).
+   - Add a clean Sector Delta & Speed Trap summary bar above or beside the chart in the frontend, plus ensure the Engineering Trace drawer shows exact OpenF1 `session_key`, `driver_number`, and `lap_number`.
+4. Verification:
+   - Add pytest tests for full-lap alignment, delta-at-finish accuracy, and a real cached OpenF1 full-lap comparison (e.g., 2024 Italian GP / Monza Qualifying `VER` vs `LEC` or `NOR`).
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+Mark completed Phase 5 tasks as [X] in tasks.md, summarize what was built and verified, and stop for my review before starting Phase 6.
+
+---
+
+Fix three bugs confirmed during Phase 5 live testing sequentially without spawning subagents:
+
+1. SSE Flush & Status Pill UX (`backend/app/chat/streaming.py`, `frontend/`):
+   - Add `Cache-Control: no-cache`, `Connection: keep-alive`, and `X-Accel-Buffering: no` response headers on `/api/chat/stream` (and disable proxy buffering in `frontend/vite.config.ts` if proxying `/api`), ensuring chunks flush immediately without mid-sentence stalls.
+   - Ensure the backend SSE generator always emits a terminal `done` frame inside a `try ... finally` block.
+   - In the frontend, clear the `"Data plotted — Engineer analyzing results..."` status pill as soon as the first `text` chunk arrives (switching to a subtle cursor/typing state until `done`), and always clear loading state in `finally` when the stream closes.
+
+2. Circuit Resolution & Session Cache Isolation ("Canadian GP" returning Monza 2024):
+   - Inspect `backend/app/data/openf1_client.py`, `backend/app/data/entity_resolver.py`, and `backend/app/agent/orchestrator.py`.
+   - Map all GP names/demonyms cleanly to OpenF1's `country_name` / `location` / `circuit_short_name` (e.g., "Canadian GP" / "Canada" -> `Montreal`/`Canada`; "Italian GP" -> `Monza`/`Italy`; "British GP" -> `Silverstone`/`Great Britain`; "Japanese GP" -> `Suzuka`/`Japan`, etc.).
+   - NEVER inherit `last_circuit` from the previous turn when the current user message explicitly mentions a circuit or Grand Prix.
+   - Verify OpenF1 disk cache keys include the exact resolved `session_key` (or `year` + `circuit_short_name` + `session_name`) so Monza and Montreal 2024 Qualifying cannot collide.
+
+3. Grounded Engineer Narration Rules (`backend/app/agent/orchestrator.py`):
+   - Instruct the PitWall Engineer NEVER to claim a driver "secured pole position" or "won the session" from a 2-driver head-to-head telemetry comparison unless the tool output explicitly confirms P1 overall across the full field. Say "edged out [Driver B]" or "set the faster lap of the pair" instead.
+   - Remove misused `"Box this ..."` sign-off phrasing from the system prompt.
+
+4. Regression Tests (`backend/tests/`):
+   - Add a test running 2024 Italian GP Qualifying followed immediately by 2024 Canadian GP Qualifying (`RUS` vs `VER`), asserting two distinct OpenF1 `session_key`s and Montreal's ~`1:12.000` lap times (not Monza's `1:19.440`).
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+Report the exact root cause behind why Montreal resolved to Monza, then summarize the changes.
+
+---
+
+/speckit-implement Execute Phase 6 (Tyre Stint Degradation & Race Pace Strategy) only from specs/001-pitwall-ai/tasks.md sequentially without spawning parallel subagents.
+
+Technical guardrails for Phase 6:
+1. Reuse OpenF1 Client + Local Cache (NO FastF1 live calls, NO hardcoded fixture fallbacks):
+   - Default tyre/stint/race-pace queries to `session_name="Race"` (or `"Sprint"` if requested), enforcing the strict 2023+ OpenF1 boundary for older years.
+   - Fetch `stints`, `laps`, and `pit` from `backend/app/data/openf1_client.py` with the same lazy disk cache keyed by exact `session_key` and rate limiting (<= 2.5 req/s).
+   - Map each lap to its stint (`lap_start <= lap_number <= lap_end`) to attach `compound` and compute exact tyre age (`tyre_age_at_start + (lap_number - lap_start)`).
+
+2. Clean-Lap Outlier Filtering & Degradation Math:
+   - Exclude Lap 1 (standing start), `is_pit_out_lap=True`, pit-in laps (laps where a pit stop occurs or the final lap before a stint transition), null `lap_duration` laps, and Safety Car / VSC / traffic outlier laps (e.g., laps > 107% of that stint's median clean lap time).
+   - Per driver and per stint (with >= 3 clean laps), compute: clean lap count, average clean pace, fastest clean lap, and observed pace slope (`sec/lap` via linear regression over stint lap index; positive = degrading, negative = improving with fuel burn).
+   - Return structured stint summaries + excluded outlier count so the PitWall Engineer narrates grounded strategy numbers without inventing fuel-corrected values or claiming race winners unless confirmed.
+
+3. Coarse-Grained ADK Tool & Pirelli Dark-HUD Visuals:
+   - Expose a single coarse-grained ADK tool (`analyze_tyre_stints`) keeping total LLM calls <= 2 per turn and logging OpenF1 `session_key`, `driver_numbers`, and filtered lap counts in the Engineering Trace drawer.
+   - Render a synchronized dark HUD (`#0B0F17`) Plotly visualization:
+     * Main panel: Clean lap times (scatter points + dashed linear trendline per stint) over Race Lap, with vertical dashed pit-stop markers showing compound switches.
+     * Secondary compact strip (or subplot): Horizontal Stint Timeline showing each driver's compound sequence and stint lengths.
+     * Use official Pirelli compound colors with high contrast on `#0B0F17`: SOFT `#FF3333`, MEDIUM `#FFD700`, HARD `#F0F0F0`, INTERMEDIATE `#39B54A`, WET `#00AEEF`. When comparing 2+ drivers, distinguish drivers clearly via marker shapes/line styles and legend labels (e.g., `LEC — HARD (S2)` vs `PIA — HARD (S3)`).
+
+4. Verification:
+   - Add unit tests for clean-lap outlier filtering (confirming Lap 1, pit in/out, and SC spikes are stripped) and linear degradation slope calculation.
+   - Add a real cached OpenF1 integration test using a classic strategy race (e.g., 2024 Italian GP Race `LEC` vs `PIA` — 1-stop vs 2-stop, or 2024 Bahrain GP Race `VER` vs `SAI`).
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+Mark completed Phase 6 tasks as [X] in tasks.md, summarize what was built and verified, and stop for my review before starting Phase 7.
+
+---
+
+Fix the TypeError in `orchestrator.py:1237` (`format_trace_event() got an unexpected keyword argument 'strategy_params'`) sequentially without spawning subagents:
+
+1. Backend SSE Trace Formatter (`backend/app/chat/streaming.py`):
+   - Inspect `format_trace_event()` and add `strategy_params: dict | None = None` (plus `**extra` pass-through for any additional domain-specific trace keys) so unpacking `**stint_result["trace"]` works cleanly and future Phase 7 trace fields cannot cause the same TypeError.
+   - Include `strategy_params` (and any non-None extra metadata) in the emitted `trace` SSE JSON payload.
+
+2. Frontend Trace Types & Drawer (`frontend/src/types/index.ts` + Engineering Trace component):
+   - Add optional `strategy_params?: Record<string, unknown>` to the trace TypeScript interface and render those fields cleanly in the Engineering Trace drawer (e.g., OpenF1 `session_key`, drivers, clean/outlier lap counts, degradation method) when present.
+
+3. Regression Test (`backend/tests/`):
+   - Add a test calling `format_trace_event(**stint_result["trace"])` (and exercising the tyre-stint branch of `orchestrator.stream_query`) to verify `trace`, `chart`, `text`, and `done` SSE events emit with zero TypeError.
+
+Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`, then summarize the fix.
+
+---
+
+Fix two bugs discovered during Phase 6 live testing sequentially without spawning subagents:
+
+1. Stale / Repeated Tyre Degradation Chart (`backend/app/agent/orchestrator.py`, tyre stint tool, `frontend/`):
+   - Inspect why asking "Show tyre degradation and race pace for Leclerc at Monza 2024" (or any subsequent tyre degradation query) after "Compare Leclerc vs Piastri tyre degradation at 2024 Italian GP" updates the text response but keeps displaying the exact same previous tyre chart.
+   - Fix driver inheritance & single-driver support: when the user explicitly names 1 driver (e.g., Leclerc), run `analyze_tyre_stints` for ONLY `[LEC]`—NEVER carry over a second driver from `last_drivers` unless the current message genuinely omits driver names.
+   - Fix cache key isolation: ensure any in-memory/SQLite/disk chart or response cache keys include the exact normalized `(tool_name, year, session_key/circuit, session_name, tuple(sorted(drivers)))` so different driver subsets or races can never collide and return a previous tyre chart.
+   - Verify the tyre stint branch ALWAYS emits a fresh `chart` SSE event (never silently swallowing chart errors while streaming text).
+   - In the frontend, clear/replace the previous chart state cleanly when a new query runs and give the Plotly `<Plot>` component a unique `key` (or incrementing `revision` + `datarevision` prop) so React/Plotly always tears down old traces and renders the new figure.
+
+2. Hardcoded `VER vs NOR` Metadata Header Above the Chart (`backend/` + `frontend/`):
+   - Inspect the Telemetry & Visual Analytics Stage header strip (where `VER`, `NOR`, `Qualifying (Q3)`, `Full-Lap Overlay`, `Track: DRY` appear) and remove ALL hardcoded `'VER'`, `'NOR'`, `'Qualifying (Q3)'`, `'SOFT'`, and `'Track: DRY'` defaults/placeholders.
+   - Emit a standardized `metadata` object inside every `chart` SSE payload across ALL tool paths (historical SQL, corner telemetry, full-lap overlay, tyre stints):
+     `{ domain, year, grand_prix, session_name, mode_label, drivers: [{ code, name, color, compound? }], track_status? }`.
+   - Render the frontend header strictly from `activeChart.metadata`:
+     * 2+ drivers -> show actual requested driver badges (`LEC vs PIA`, `VER vs SAI`, etc.) with real team/compound colors.
+     * 1 driver -> show a single driver badge (e.g., `LEC`) with NO `vs` separator.
+     * Historical SQL / leaderboard queries (no head-to-head pair) -> hide the driver-vs-driver pills and show the actual historical scope (e.g., `Historical SQL • DuckDB`).
+     * Only display `Track: DRY/WET` or compound tags when the backend actually supplies them.
+
+3. Regression Tests (`backend/tests/` + frontend build):
+   - Add a backend test running two back-to-back tyre queries: (1) `LEC` vs `PIA` at 2024 Italian GP, then (2) solo `LEC` at 2024 Italian GP, then (3) `VER` vs `SAI` at 2024 Bahrain GP. Assert all three emit distinct Plotly figures, query (2) contains ONLY Leclerc traces (no Piastri), and `chart.metadata.drivers` matches the exact requested drivers in each case (never defaulting to `VER`/`NOR`).
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+Report the exact root causes found in both files, then summarize the fixes.
+
+---
+
+Fix a React blank-screen crash that occurs when requesting full-lap telemetry comparisons (regression introduced during the metadata/chart-header refactor), sequentially without spawning subagents:
+
+1. Backend Payload Contract Audit (`backend/app/agent/orchestrator.py`, full-lap tool, `backend/app/chat/streaming.py`):
+   - Inspect the exact `chart` SSE payload emitted by ALL four tool paths: (a) historical SQL, (b) corner telemetry, (c) full-lap telemetry overlay, and (d) tyre stint degradation.
+   - Ensure the **full-lap telemetry** path emits the exact same normalized `chart` envelope and `metadata` schema as the other tools:
+     `metadata: { domain, year, grand_prix, session_name, mode_label, drivers: [{ code, name, color, compound? }], track_status?, sector_summary? }`
+   - Check specifically for mismatches that crash React on full-lap responses (e.g., `drivers` emitted as plain strings `["VER", "NOR"]` instead of objects, `null`/`undefined` nested keys, `plotly_json` vs `figure` key mismatch, or NaN/Infinity values leaking into JSON).
+
+2. Defensive Frontend Rendering & Error Boundary (`frontend/src/`):
+   - Audit every component that reads `activeChart`, `metadata`, `metadata.drivers`, sector delta strips, and `<Plot>` props for full-lap telemetry. Add strict null/type guards (`Array.isArray`, optional chaining, safe defaults) so missing optional fields can NEVER throw a runtime `TypeError`.
+   - Wrap the Telemetry & Visual Analytics Stage in a clean dark-HUD React `ErrorBoundary` component so even if a future chart payload is malformed, the app never blanks out—it displays the error details inside the stage with a reset button while keeping chat usable.
+
+3. Contract & Render Verification:
+   - Add a backend pytest contract test asserting that the `chart` SSE payloads from historical SQL, corner telemetry, **full-lap telemetry**, and tyre stints all pass a shared schema validator (valid JSON with zero `NaN`/`Infinity`, valid `figure.data`/`figure.layout`, and valid `metadata.drivers` object list).
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+   - If Playwright is runnable locally, run a quick headless check (or Vitest/component render test) mounting the Telemetry Stage with a real full-lap payload to verify zero console errors and a rendered Plotly chart.
+
+Report the exact line/mismatch that caused the full-lap blank screen, then summarize the fix.

@@ -1,0 +1,56 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M89WR0BHCJSN2J10E1EZ4CY8",
+  "strategy": "manual-commit",
+  "branch": "master",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "backend/app/agent/orchestrator.py",
+    "backend/app/agent/tools/corner_compare.py",
+    "backend/app/agent/tools/telemetry.py",
+    "backend/app/charts/historical_charts.py",
+    "backend/app/charts/plotly_theme.py",
+    "backend/app/charts/telemetry_charts.py",
+    "backend/app/chat/streaming.py",
+    "frontend/src/App.tsx",
+    "frontend/src/components/ChartStage/ChartStage.tsx",
+    "frontend/src/components/ChartStage/PlotlyChart.tsx",
+    "frontend/src/components/ChartStage/SectorSummaryBar.tsx",
+    "frontend/src/components/ChartStage/TrackMiniMap.tsx",
+    "frontend/src/components/ChatPanel/PresetPrompts.tsx",
+    "frontend/src/components/EngineeringTrace/TraceDrawer.tsx",
+    "frontend/src/components/MetadataBar/MetadataBar.tsx",
+    "frontend/src/hooks/useSSEStream.ts",
+    "frontend/src/types/index.ts",
+    "specs/001-pitwall-ai/tasks.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 912115,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 40857215,
+    "output_tokens": 132563,
+    "api_call_count": 260
+  },
+  "redaction": {
+    "replacements": 60,
+    "layers": {
+      "betterleaks": 28,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 29,
+      "credentialed_uri": 0,
+      "entropy": 3,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
