@@ -20,15 +20,31 @@ def _attempt_zero_row_correction(sql: str) -> Optional[str]:
 
     # Brazil / Interlagos / São Paulo
     if "brazil" in sql_lower:
-        pattern = r"lower\(grand_prix\)\s+like\s+'%brazil%'"
-        replacement = "(lower(grand_prix) LIKE '%brazil%' OR lower(grand_prix) LIKE '%são paulo%' OR lower(circuit_country) = 'brazil')"
-        corrected = re.sub(pattern, replacement, sql, flags=re.IGNORECASE)
+        pattern = re.compile(
+            r"(?:"
+            r"(?:lower\s*\(\s*(?:(?P<a1>\w+)\.)?grand_prix\s*\)|(?:(?P<a2>\w+)\.)?grand_prix)\s+(?:i?like)\s+'%brazil[^']*%'"
+            r"|"
+            r"(?:lower\s*\(\s*(?:(?P<a3>\w+)\.)?grand_prix\s*\)|(?:(?P<a4>\w+)\.)?grand_prix)\s*=\s*'(?:brazilian|brazil)\s+grand\s+prix'"
+            r"|"
+            r"(?:lower\s*\(\s*(?:(?P<a5>\w+)\.)?circuit_country\s*\)|(?:(?P<a6>\w+)\.)?circuit_country)\s*=\s*'brazil'"
+            r")",
+            re.IGNORECASE,
+        )
+        def _build_brazil_predicate(alias: str | None) -> str:
+            pfx = f"{alias}." if alias else ""
+            return (
+                f"(lower({pfx}grand_prix) LIKE '%brazil%' OR "
+                f"lower({pfx}grand_prix) LIKE '%são paulo%' OR "
+                f"lower({pfx}circuit_country) = 'brazil')"
+            )
+        corrected = pattern.sub(
+            lambda m: _build_brazil_predicate(
+                m.group("a1") or m.group("a2") or m.group("a3") or m.group("a4") or m.group("a5") or m.group("a6")
+            ),
+            sql,
+        )
         if corrected != sql:
             return corrected
-        pattern2 = r"grand_prix\s*=\s*'Brazilian Grand Prix'"
-        corrected2 = re.sub(pattern2, "(lower(grand_prix) LIKE '%brazil%' OR lower(grand_prix) LIKE '%são paulo%' OR lower(circuit_country) = 'brazil')", sql, flags=re.IGNORECASE)
-        if corrected2 != sql:
-            return corrected2
 
     # Mexico
     if "mexico" in sql_lower:
