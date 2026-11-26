@@ -1,0 +1,83 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M8CK64358V0TPHD47MVCWB98",
+  "session_id": "e52e5399-a9e6-4189-b2f6-798ed5d0de03",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-26T18:51:53.0573712Z",
+  "branch": "feat/a2a-multi-agent",
+  "checkpoints_count": 6,
+  "save_step_count": 6,
+  "files_touched": [
+    "backend/app/a2a/agents/historical_agent.py",
+    "backend/app/a2a/agents/presentation_agent.py",
+    "backend/app/a2a/agents/research_agent.py",
+    "backend/app/a2a/agents/telemetry_agent.py",
+    "backend/app/agent/tools/historical_sql.py",
+    "backend/app/main.py",
+    "backend/requirements.txt",
+    "backend/tests/test_a2a_specialists.py",
+    "backend/tests/test_live_testing_bug_fixes.py",
+    "data/artifacts/1039c7ba-e229-488c-be47-ac626011e578.json",
+    "data/artifacts/15cd85dd-6fc5-48e6-abea-3e4b4594b56a.json",
+    "data/artifacts/1648292a-1b95-4698-8640-237eaddb21fb.json",
+    "data/artifacts/213824a5-c079-4dbb-94d7-1749b383a7e3.json",
+    "data/artifacts/40e32a6b-4447-4aca-b9fc-989e6228f635.json",
+    "data/artifacts/5075ae72-2514-4f80-a4fa-96146f0aadcc.json",
+    "data/artifacts/52cf1a61-169f-4001-a016-074798239788.json",
+    "data/artifacts/7a61d7e2-1613-49a6-9b3f-4936c29461ce.json",
+    "data/artifacts/7cdd43e9-2c85-4dac-ba32-f5a4fa0baacb.json",
+    "data/artifacts/8cd38300-4ae4-4021-8dd9-d64e17d0caa9.json",
+    "data/artifacts/9c8aaffd-b56f-494d-8df8-673c8dc3906b.json",
+    "data/artifacts/ae5ce2bb-2cda-48d8-866c-5547dd10d4a2.json",
+    "data/artifacts/af03d1bb-acf9-457d-812d-ea5bf6809060.json",
+    "data/artifacts/b5197f35-5bd0-4733-bbc5-584082c5fa8e.json",
+    "data/artifacts/b62b2ceb-f894-4db9-a066-ec8dc711495f.json",
+    "data/artifacts/c210ea9c-49dc-4337-90a9-95fe9e309b5d.json",
+    "data/artifacts/c2428588-c0fd-4561-aeac-a683a802379a.json",
+    "data/artifacts/c4ed9fa7-2b73-4838-976e-55506309988e.json",
+    "data/artifacts/cb1ede07-090e-49ab-9e7f-ca3be8d07355.json",
+    "data/artifacts/d3a44a92-e7fc-4738-bea3-5ccf34b2df41.json",
+    "data/artifacts/d992f40b-7233-48ed-9926-7251fd0d3279.json",
+    "data/artifacts/ec0484fb-5e05-4466-9d7d-cf3ecc5676ca.json",
+    "data/artifacts/edf5fc1a-4aab-4390-a5ce-59d9ea47a6a9.json",
+    "data/artifacts/ef8f7a3b-3efe-41a7-84bc-1a01554e9683.json",
+    "data/artifacts/fb891cb5-8188-48d7-a0a5-6e614d696ad3.json",
+    "data/corner_nicknames.json"
+  ],
+  "agent": "Antigravity",
+  "model": "",
+  "turn_id": "38c2f4b928dc",
+  "checkpoint_transcript_start": 3453,
+  "transcript_lines_at_start": 3453,
+  "token_usage": {
+    "input_tokens": 2335660,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 53136565,
+    "output_tokens": 229266,
+    "api_call_count": 413
+  },
+  "session_token_usage": {
+    "input_tokens": 9039103,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 239802194,
+    "output_tokens": 1067055,
+    "api_call_count": 1738
+  },
+  "redaction": {
+    "replacements": 95,
+    "layers": {
+      "betterleaks": 28,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 49,
+      "credentialed_uri": 0,
+      "entropy": 18,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 9
+  }
+}

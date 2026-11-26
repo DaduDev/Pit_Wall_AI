@@ -1,0 +1,104 @@
+Implement Pass 1 of migrating PitWall AI to a multi-agent Google ADK + A2A architecture sequentially without spawning parallel subagents (keep existing `/api/chat/stream` working until Pass 2):
+
+1. Check Dependencies & Shared Artifact Store (`backend/app/a2a/artifact_store.py`):
+   - Check installed `google-adk` and `a2a-sdk` versions in the active Python environment; install `a2a-sdk` / ADK A2A extras if needed and update `requirements.txt` / `pyproject.toml`.
+   - Create a thread-safe, disk-backed `ArtifactStore` (`./data/artifacts/`) storing heavy payloads (aligned telemetry dataframes, stint tables, SQL result sets, web research sources) keyed by `dataset_id` (UUID) with TTL cleanup. A2A agents MUST pass `dataset_id` + compact summary JSON instead of raw arrays.
+
+2. Universal Circuit Corner Engine (`backend/app/data/circuit_corners.py` + `data/corner_nicknames.json`):
+   - Integrate MultiViewer's circuit geometry API (`https://api.multiviewer.app/api/v1/circuits/{circuit_key}/{year}`) with permanent local disk caching in `./data/openf1_cache/circuits/` so every numbered turn on every modern F1 circuit has exact `(x, y)` coordinates matching OpenF1's `location` stream.
+   - Expand `data/corner_nicknames.json` to cover all 24 modern F1 circuits and iconic nicknames (including Suzuka `130R` -> Turn 15, `Degner`, `Spoon`, `Casio Triangle`, `Silverstone` Copse/Maggotts/Becketts, `Spa` Eau Rouge/Raidillon/Pouhon/Blanchimont, `Monza` Rettifilo/Ascari/Parabolica, `Interlagos` Senna S/Descida do Lago, `Monaco` Sainte Devote/Massenet/Loews/Tabac/Rascasse, etc.).
+   - Normalize circuit keys and match nicknames BEFORE parsing numeric turn numbers so `130R` never parses as Turn 130.
+   - Add a separate `./data/learned_aliases.json` cache (tagged `source="web_verified"`) that maps newly discovered corner nicknames -> verified turn numbers without mutating read-only DuckDB.
+
+3. Build Four A2A Specialist Agents (`backend/app/a2a/agents/`):
+   Use Google ADK + official A2A server utilities (`to_a2a` / `AgentCard` / JSON-RPC task handler) and expose them via a mountable ASGI router (`backend/app/a2a/registry.py`) supporting both single-process sub-path mounts (`/a2a/historical`, `/a2a/telemetry`, `/a2a/research`, `/a2a/viz`) AND env-overridable external URLs:
+   - `historical_agent.py` (`/a2a/historical`): Wraps existing read-only DuckDB SQL tool + alias resolver + 1x zero-row retry; stores full table in `ArtifactStore` and returns compact summary + `dataset_id` + SQL trace.
+   - `telemetry_agent.py` (`/a2a/telemetry`): Wraps existing OpenF1 client, corner compare (now using `circuit_corners.py`), full-lap overlay, and tyre stints; enforces the strict 2023+ telemetry boundary; stores series in `ArtifactStore` and returns verified metrics + `dataset_id` + `session_key`. If a corner nickname is unknown, returns a structured `unknown_corner` hint instead of crashing silently.
+   - `research_agent.py` (`/a2a/research`): Dedicated ADK agent using Gemini's built-in `google_search` grounding tool for off-dataset F1 questions (race incidents, steward penalties, 2025/2026 news) AND resolving unknown corner nicknames to official turn numbers (which can then be verified against MultiViewer and saved to `learned_aliases.json`). Must gracefully return a clear structured "web search unavailable in offline Ollama mode" status when running locally without Gemini API access.
+   - `presentation_agent.py` (`/a2a/viz`): Accepts `{ user_query, dataset_id, domain, summary, display_preferences? }` and outputs a strict Pydantic `VizSpec` rendered deterministically from `ArtifactStore[dataset_id]` into our normalized Plotly `#0B0F17` HUD payload (for telemetry/stints/SQL charts/tables) OR a new `web_intelligence_card` payload (summary bullets + clickable grounded source links, never fake telemetry). Must enforce the standardized `metadata` schema (`domain, year, grand_prix, session_name, mode_label, drivers: [{ code, name, color, compound? }]`).
+
+4. Verification (`backend/tests/test_a2a_specialists.py`):
+   - Mount the A2A ASGI app in FastAPI `TestClient` / `httpx.AsyncClient` and verify:
+     * All 4 `/.well-known/agent-card.json` endpoints return valid A2A Agent Cards.
+     * `TelemetryAgent` resolves Suzuka `130R` cleanly using `circuit_corners.py` and returns a valid `dataset_id`.
+     * `HistoricalSQLAgent` returns verified Brazil 2021 (`São Paulo Grand Prix`) data + `dataset_id`.
+     * `PresentationAgent` produces schema-valid Plotly `chart` payloads from `dataset_id` (for corner, full-lap, tyre stint, and SQL) AND a valid `web_intelligence_card` payload.
+   - Run `python -m pytest backend/tests/ -v`.
+
+Summarize the installed A2A SDK version, Agent Card endpoints, and pytest results, then STOP before modifying `orchestrator.py` (we will do the root orchestrator cutover in Pass 2).
+
+---
+
+how do I test this?
+
+---
+
+I want to test the agents build from frontend
+
+---
+
+undo everything that you've did till now after this request:I want to test the agents build from frontend
+
+---
+
+Let me test them in swagger and get back to you
+
+---
+
+Fix all Pass 1 A2A specialist bugs uncovered during live-data verification (do NOT modify `orchestrator.py` or `/api/chat/stream` yet; run sequentially without spawning subagents):
+
+1. Fix HTTP 500 in `TelemetryAgent` (`compare_corners` & `compare_full_lap`):
+   - Reproduce and fix the unhandled 500 exceptions on:
+     * `POST /a2a/telemetry/compare-corners` with `{"year": 2024, "grand_prix": "Suzuka", "session_type": "Qualifying", "driver_1": "VER", "driver_2": "NOR", "corner": "130R"}`
+     * `POST /a2a/telemetry/compare-lap` with `{"year": 2024, "grand_prix": "Canadian Grand Prix", "session_type": "Qualifying", "driver_1": "RUS", "driver_2": "VER"}`
+   - Audit `ArtifactStore._serialize_data()` so `numpy` scalars/arrays, `pandas` Timestamps/DataFrames, and `NaN`/`Infinity` values convert cleanly to strict JSON (replacing `NaN`/`Inf` with `None`).
+   - Verify `compare_corners` resolves Suzuka `130R` (Turn 15 via `CircuitCornerEngine`), stores the aligned corner dataset in `ArtifactStore`, and returns top-level `{ success: true, dataset_id, summary, metrics, trace }`.
+   - Verify `compare_full_lap` returns Montreal `1:12.000` vs `1:12.000` (`0.000s` delta) + top-level `dataset_id`, and `POST /a2a/viz/render` renders both into schema-valid Plotly figures with `metadata.drivers` set to `[VER, NOR]` and `[RUS, VER]`.
+   - Catch runtime failures cleanly and return structured error JSON (`success: false, error: ...`) instead of raw 500 Internal Server Errors.
+   - Fix the Agent Card description encoding (`2023-present` ASCII hyphen instead of `2023âpresent`).
+
+2. Fix Missing `dataset_id` in `TelemetryAgent.analyze_tyre_stints`:
+   - Inspect `POST /a2a/telemetry/tyre-stints` (both `["LEC", "PIA"]` and solo `["LEC"]` for `2024 Italian Grand Prix Race`).
+   - Ensure `analyze_tyre_stints` stores its stint/lap payload in `ArtifactStore` and returns top-level `dataset_id` (guaranteed distinct for `["LEC", "PIA"]` vs `["LEC"]`), and that `POST /a2a/viz/render` renders the solo `LEC` `dataset_id` into a Plotly figure with ONLY Leclerc traces and `metadata.drivers` containing only `LEC`.
+
+3. Fix `ResearchAgent` Dropping Into `"offline fallback"`:
+   - Inspect `backend/app/a2a/agents/research_agent.py` to find why `POST /a2a/research/query` returned `"Research inquiry processed with offline fallback"` instead of real Gemini Search Grounding.
+   - Check API key resolution (`GEMINI_API_KEY` and `GOOGLE_API_KEY` via `.env` / settings), Gemini model name compatibility with `google_search` grounding, and exception logging (log the exact error if grounding fails instead of hiding it silently).
+   - Ensure online mode returns real grounded facts, source URLs (`[{ title, url }]`), `grounded: true`, and `dataset_id` so `/a2a/viz/render` builds a real `web_intelligence_card`. Only use offline fallback when no API key is present or network is genuinely unreachable.
+
+4. Fix `HistoricalSQLAgent` Alias Rewrite & Natural-Language Input:
+   - Update `_normalize_common_aliases` so `LIKE '%Brazil%'` / `ILIKE '%Brazil%'` / `'Brazilian Grand Prix'` for 2021+ seasons properly resolves to `São Paulo Grand Prix` (or matches `circuit_country = 'Brazil'`), and run 1x automatic 0-row fallback retry before returning. Do NOT store empty 0-row artifacts when a query returns 0 rows.
+   - Support natural-language questions in `HistoricalSQLAgent` (accept `{ "question": "..." }` or plain English in `sql_or_query` / `/a2a/historical`) so the agent generates read-only DuckDB SQL itself using the curated views (`v_race_results`, `v_qualifying`, `v_pit_stops`, `v_driver_standings`), while still allowing direct `sql` execution when explicitly provided.
+
+5. Real-Data Verification:
+   - Add/update tests in `backend/tests/test_a2a_specialists.py` covering all 4 fixes above (including `compare-corners` 130R, `compare-lap` Montreal, `tyre-stints` solo + pair `dataset_id` isolation, `viz/render` for every `dataset_id`, and `LIKE '%Brazil%'`).
+   - Run `python -m pytest backend/tests/ -v`.
+
+Report the exact root cause of both HTTP 500s, the missing tyre-stint `dataset_id`, and the research offline fallback, then summarize the test results.
+
+---
+
+Fix the final 2 Pass 1 live-test failures and 2 payload mismatches sequentially without spawning subagents (do NOT modify `orchestrator.py` or `/api/chat/stream` yet):
+
+1. Fix Table-Alias Corruption in `HistoricalSQLAgent._normalize_common_aliases` (`backend/app/a2a/agents/historical_agent.py`):
+   - Live NL test failed with DuckDB `Parser Error` at:
+     `AND (lower(w1.(lower(grand_prix) LIKE '%brazil%' OR lower(grand_prix)...`
+   - Fix the alias-rewrite regex so it captures an optional table qualifier (`(?:(?P<alias>\w+)\.)?grand_prix`) and wraps the entire `lower(<alias>grand_prix) LIKE ...` expression cleanly instead of injecting parentheses after `w1.`.
+   - Also check `lower(...)` wrapping so `lower(w1.grand_prix) LIKE '%brazil%'` is replaced as a whole predicate without nested `lower(w1.(lower(...)))`.
+   - Add a unit test asserting both unqualified (`grand_prix LIKE '%Brazil%'`) and table-aliased (`lower(w1.grand_prix) LIKE '%brazil%'`) SQL rewrite into valid executable DuckDB SQL.
+
+2. Fix `ResearchAgent` Silent `"offline fallback"` (`backend/app/a2a/agents/research_agent.py`):
+   - Diagnose the exact exception causing `POST /a2a/research/query` to return `grounded=False` and `"Research inquiry processed with offline fallback"`.
+   - Inspect how `.env` / `GEMINI_API_KEY` / `GOOGLE_API_KEY` is loaded, which Gemini model is being called for Search Grounding, and the exact `google-genai` SDK syntax used for `GoogleSearch` (`types.Tool(google_search=types.GoogleSearch())`).
+   - Log the exact exception with `logger.exception(...)` whenever grounding fails, and if the configured default model doesn't support `google_search` grounding, fall back to a grounding-compatible Gemini Flash model before giving up to offline mode.
+   - Verify with a live call to `research_topic("What happened between Verstappen and Hamilton at Turn 4 during the 2021 Brazilian GP?")` that `grounded=True` and real `sources` URLs are returned.
+
+3. Unify `PresentationAgent` Response Schema (`backend/app/a2a/agents/presentation_agent.py`):
+   - Ensure `POST /a2a/viz/render` returns a consistent top-level contract across ALL domains:
+     * For `historical_sql`, `corner_telemetry`, `full_lap`, and `tyre_stints`: ALWAYS include top-level `figure` (`{"data": [...], "layout": {...}}`), `viz_type`, and `metadata`.
+     * For `research`: ALWAYS include top-level `viz_type: "web_intelligence_card"` and `web_intelligence_card: { title, summary, bullets, sources: [{ title, url }], grounded }` (never an empty Plotly figure).
+
+4. Populate `Apex speeds` in `TelemetryAgent.compare_corners` Summary (`backend/app/a2a/agents/telemetry_agent.py`):
+   - Live test returned `Apex speeds: {}` in the summary string for 2024 Suzuka `130R`. Read the actual apex speed keys returned by `compare_corner_telemetry` so the summary reports real `VER` and `NOR` km/h figures.
+
+Run `python -m pytest backend/tests/ -v` and report the exact reason `ResearchAgent` was hitting offline fallback plus test results.
