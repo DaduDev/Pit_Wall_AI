@@ -30,7 +30,8 @@ import litellm
 
 from google.adk.agents.llm_agent import LlmAgent
 
-from backend.app.config import settings
+from backend.app.config import settings, build_thinking_config, is_unsupported_thinking_error
+from backend.app.llm import stream_with_failover, get_active_provider_hint
 from backend.app.agent.prompts.system import RACE_ENGINEER_SYSTEM_PROMPT
 from backend.app.a2a.client import A2AClient, get_a2a_client
 from backend.app.chat.session import ConversationSession
@@ -262,14 +263,21 @@ class RaceEngineerOrchestrator:
         self.gemini_model = settings.GEMINI_MODEL
         self.ollama_model = settings.OLLAMA_MODEL
         self.api_key = settings.GOOGLE_API_KEY
+        self._genai_client = None
         self.a2a = a2a_client or get_a2a_client()
         self.engineer = PitWallEngineer(a2a_client=self.a2a)
+
+    def _get_genai_client(self):
+        if self._genai_client is None:
+            from google import genai
+            self._genai_client = genai.Client(api_key=self.api_key)
+        return self._genai_client
 
     def _get_cache_key(self, query: str) -> str:
         return re.sub(r"\s+", " ", query.strip().lower())
 
     async def _check_ollama_available(self) -> bool:
-        """Quick 250ms probe to check if local Ollama daemon is reachable on localhost."""
+        """Probe to check if local Ollama daemon is reachable on 127.0.0.1."""
         try:
             port = 11434
             m = re.search(r":(\d+)", settings.OLLAMA_API_BASE)
@@ -277,7 +285,7 @@ class RaceEngineerOrchestrator:
                 port = int(m.group(1))
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection("127.0.0.1", port),
-                timeout=0.25,
+                timeout=1.5,
             )
             writer.close()
             await writer.wait_closed()
@@ -286,49 +294,72 @@ class RaceEngineerOrchestrator:
             return False
 
     async def _call_gemini(self, messages: List[Dict[str, str]], tools: Optional[List[Dict[str, Any]]] = None) -> Any:
-        """Invokes Gemini 3.5 Flash Lite using google.genai client with thinking_level='low'."""
-        from google import genai
+        """Invokes configured Gemini model using google.genai client with minimal guarded thinking."""
         from google.genai import types
 
-        client = genai.Client(api_key=self.api_key)
+        client = self._get_genai_client()
 
         contents = []
         for m in messages:
             role = "user" if m["role"] == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m["content"])]))
 
-        config = types.GenerateContentConfig(
-            system_instruction=RACE_ENGINEER_SYSTEM_PROMPT,
-            thinking_config=types.ThinkingConfig(thinking_level=settings.GEMINI_THINKING_LEVEL),
-        )
+        t_cfg = build_thinking_config(self.gemini_model)
+        cfg_kwargs: Dict[str, Any] = {"system_instruction": RACE_ENGINEER_SYSTEM_PROMPT}
+        if t_cfg is not None:
+            cfg_kwargs["thinking_config"] = t_cfg
+        config = types.GenerateContentConfig(**cfg_kwargs)
 
         async with _GEMINI_SEMAPHORE:
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=self.gemini_model,
-                contents=contents,
-                config=config,
-            )
+            try:
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
+                    model=self.gemini_model,
+                    contents=contents,
+                    config=config,
+                )
+            except Exception as err:
+                if t_cfg is not None and is_unsupported_thinking_error(err):
+                    fallback_cfg = types.GenerateContentConfig(system_instruction=RACE_ENGINEER_SYSTEM_PROMPT)
+                    response = await asyncio.to_thread(
+                        client.models.generate_content,
+                        model=self.gemini_model,
+                        contents=contents,
+                        config=fallback_cfg,
+                    )
+                else:
+                    raise
             return response.text
 
     async def _stream_gemini_commentary(self, prompt: str) -> AsyncGenerator[str, None]:
-        """Streams commentary text chunks from Gemini 3.5 Flash Lite using client.aio."""
-        from google import genai
+        """Streams commentary text chunks from configured Gemini model using client.aio."""
         from google.genai import types
 
-        client = genai.Client(api_key=self.api_key)
+        client = self._get_genai_client()
         contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
-        config = types.GenerateContentConfig(
-            system_instruction=RACE_ENGINEER_SYSTEM_PROMPT,
-            thinking_config=types.ThinkingConfig(thinking_level=settings.GEMINI_THINKING_LEVEL),
-        )
+        t_cfg = build_thinking_config(self.gemini_model)
+        cfg_kwargs: Dict[str, Any] = {"system_instruction": RACE_ENGINEER_SYSTEM_PROMPT}
+        if t_cfg is not None:
+            cfg_kwargs["thinking_config"] = t_cfg
+        config = types.GenerateContentConfig(**cfg_kwargs)
 
         async with _GEMINI_SEMAPHORE:
-            stream = await client.aio.models.generate_content_stream(
-                model=self.gemini_model,
-                contents=contents,
-                config=config,
-            )
+            try:
+                stream = await client.aio.models.generate_content_stream(
+                    model=self.gemini_model,
+                    contents=contents,
+                    config=config,
+                )
+            except Exception as err:
+                if t_cfg is not None and is_unsupported_thinking_error(err):
+                    fallback_cfg = types.GenerateContentConfig(system_instruction=RACE_ENGINEER_SYSTEM_PROMPT)
+                    stream = await client.aio.models.generate_content_stream(
+                        model=self.gemini_model,
+                        contents=contents,
+                        config=fallback_cfg,
+                    )
+                else:
+                    raise
             async for response in stream:
                 if response.text:
                     yield response.text
@@ -346,7 +377,7 @@ class RaceEngineerOrchestrator:
                 api_base=settings.OLLAMA_API_BASE,
                 messages=formatted_messages,
                 tools=tools,
-                timeout=5.0,
+                timeout=150.0,
                 num_retries=0,
             )
             return response.choices[0].message.content or ""
@@ -368,7 +399,7 @@ class RaceEngineerOrchestrator:
                 api_base=settings.OLLAMA_API_BASE,
                 messages=messages,
                 stream=True,
-                timeout=5.0,
+                timeout=150.0,
                 num_retries=0,
             )
             async for chunk in response:
@@ -419,6 +450,32 @@ class RaceEngineerOrchestrator:
 
         return default_gp, default_key
 
+    _KNOWN_DRIVERS: Dict[str, str] = {
+        "verstappen": "VER", "ver": "VER", "max": "VER",
+        "norris": "NOR", "nor": "NOR", "lando": "NOR",
+        "hamilton": "HAM", "ham": "HAM", "lewis": "HAM",
+        "leclerc": "LEC", "lec": "LEC", "charles": "LEC",
+        "piastri": "PIA", "pia": "PIA", "oscar": "PIA",
+        "alonso": "ALO", "alo": "ALO", "fernando": "ALO",
+        "sainz": "SAI", "sai": "SAI", "carlos": "SAI",
+        "russell": "RUS", "rus": "RUS", "george": "RUS",
+        "perez": "PER", "per": "PER", "checo": "PER",
+    }
+
+    def _extract_drivers_in_order(self, q: str) -> List[str]:
+        """Extract driver codes in the order they appear in the query text."""
+        hits: List[Tuple[int, str]] = []
+        for name, code in self._KNOWN_DRIVERS.items():
+            m = re.search(rf"\b{name}\b", q)
+            if m:
+                hits.append((m.start(), code))
+        hits.sort(key=lambda item: item[0])
+        ordered: List[str] = []
+        for _, code in hits:
+            if code not in ordered:
+                ordered.append(code)
+        return ordered
+
     def _parse_tyre_stint_intent(
         self,
         user_query: str,
@@ -453,23 +510,7 @@ class RaceEngineerOrchestrator:
         if has_corner and not any(kw in q for kw in ["stint", "tyre", "tire", "degradation", "race pace"]):
             return None
 
-        known_drivers = {
-            "verstappen": "VER", "ver": "VER", "max": "VER",
-            "norris": "NOR", "nor": "NOR", "lando": "NOR",
-            "hamilton": "HAM", "ham": "HAM", "lewis": "HAM",
-            "leclerc": "LEC", "lec": "LEC", "charles": "LEC",
-            "piastri": "PIA", "pia": "PIA", "oscar": "PIA",
-            "alonso": "ALO", "alo": "ALO", "fernando": "ALO",
-            "sainz": "SAI", "sai": "SAI", "carlos": "SAI",
-            "russell": "RUS", "rus": "RUS", "george": "RUS",
-            "perez": "PER", "per": "PER", "checo": "PER",
-        }
-
-        matched_drivers = []
-        for name, code in known_drivers.items():
-            if re.search(rf"\b{name}\b", q):
-                if code not in matched_drivers:
-                    matched_drivers.append(code)
+        matched_drivers = self._extract_drivers_in_order(q)
 
         # Inherit drivers from session ONLY if current query genuinely omits driver names
         if not matched_drivers and session and hasattr(session, "last_entities") and session.last_entities:
@@ -536,23 +577,7 @@ class RaceEngineerOrchestrator:
         if not has_full_lap_kw:
             return None
 
-        known_drivers = {
-            "verstappen": "VER", "ver": "VER", "max": "VER",
-            "norris": "NOR", "nor": "NOR", "lando": "NOR",
-            "hamilton": "HAM", "ham": "HAM", "lewis": "HAM",
-            "leclerc": "LEC", "lec": "LEC", "charles": "LEC",
-            "piastri": "PIA", "pia": "PIA", "oscar": "PIA",
-            "alonso": "ALO", "alo": "ALO", "fernando": "ALO",
-            "sainz": "SAI", "sai": "SAI", "carlos": "SAI",
-            "russell": "RUS", "rus": "RUS", "george": "RUS",
-            "perez": "PER", "per": "PER", "checo": "PER",
-        }
-
-        matched_drivers = []
-        for name, code in known_drivers.items():
-            if re.search(rf"\b{name}\b", q):
-                if code not in matched_drivers:
-                    matched_drivers.append(code)
+        matched_drivers = self._extract_drivers_in_order(q)
 
         if session and hasattr(session, "last_entities") and session.last_entities:
             last_drivers = session.last_entities.drivers or []
@@ -608,23 +633,7 @@ class RaceEngineerOrchestrator:
         """
         q = user_query.lower()
 
-        known_drivers = {
-            "verstappen": "VER", "ver": "VER", "max": "VER",
-            "norris": "NOR", "nor": "NOR", "lando": "NOR",
-            "hamilton": "HAM", "ham": "HAM", "lewis": "HAM",
-            "leclerc": "LEC", "lec": "LEC", "charles": "LEC",
-            "piastri": "PIA", "pia": "PIA", "oscar": "PIA",
-            "alonso": "ALO", "alo": "ALO", "fernando": "ALO",
-            "sainz": "SAI", "sai": "SAI", "carlos": "SAI",
-            "russell": "RUS", "rus": "RUS", "george": "RUS",
-            "perez": "PER", "per": "PER", "checo": "PER",
-        }
-
-        matched_drivers = []
-        for name, code in known_drivers.items():
-            if re.search(rf"\b{name}\b", q):
-                if code not in matched_drivers:
-                    matched_drivers.append(code)
+        matched_drivers = self._extract_drivers_in_order(q)
 
         if session and hasattr(session, "last_entities") and session.last_entities:
             last_drivers = session.last_entities.drivers or []
@@ -792,47 +801,68 @@ class RaceEngineerOrchestrator:
         prompt: str,
         fallback_text: str,
         session: ConversationSession,
+        provider_state: Optional[Dict[str, str]] = None,
     ) -> AsyncGenerator[str, None]:
-        """Streams LLM commentary chunks with graceful fallback to deterministic pit-wall radio speech."""
-        if self.provider == "gemini" and self.api_key:
-            try:
-                chunk_emitted = False
-                async for chunk in self._stream_gemini_commentary(prompt):
-                    if chunk:
-                        chunk_emitted = True
-                        yield chunk
-                if chunk_emitted:
-                    return
-            except Exception as e:
-                logger.warning(f"Gemini commentary stream failed: {e}. Checking Ollama fallback...")
-                try:
-                    chunk_emitted = False
-                    async for chunk in self._stream_ollama_commentary(prompt, session):
-                        if chunk:
-                            chunk_emitted = True
-                            yield chunk
-                    if chunk_emitted:
-                        return
-                except Exception as oe:
-                    logger.warning(f"Ollama commentary stream failed: {oe}")
-        elif self.provider == "ollama":
-            try:
-                chunk_emitted = False
-                async for chunk in self._stream_ollama_commentary(prompt, session):
-                    if chunk:
-                        chunk_emitted = True
-                        yield chunk
-                if chunk_emitted:
-                    return
-            except Exception as e:
-                logger.warning(f"Ollama commentary stream failed: {e}")
-
-        # Deterministic pit-wall radio fallback
-        words = fallback_text.split(" ")
-        for i in range(0, len(words), 3):
-            chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
+        """Streams LLM commentary chunks via unified Gemini -> local Ollama runtime failover helper."""
+        async for chunk in stream_with_failover(
+            prompt,
+            system_instruction=RACE_ENGINEER_SYSTEM_PROMPT,
+            model=self.gemini_model,
+            fallback_text=fallback_text,
+            provider_state=provider_state,
+        ):
             yield chunk
-            await asyncio.sleep(0.01)
+
+    def _build_historical_chart_kwargs(
+        self,
+        viz_res: Dict[str, Any],
+        fallback_title: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Normalize PresentationAgent output for historical queries into format_chart_event kwargs."""
+        if not isinstance(viz_res, dict):
+            return None
+
+        raw_viz_type = viz_res.get("viz_type", "plotly_figure")
+        title = viz_res.get("title") or fallback_title
+        meta = viz_res.get("metadata") or {"domain": "historical", "drivers": []}
+
+        if raw_viz_type == "kpi_card" and viz_res.get("kpi_card"):
+            kpi = viz_res["kpi_card"]
+            return {
+                "chart_type": "kpi_card",
+                "viz_type": "kpi_card",
+                "title": title,
+                "spec": {"viz_type": "kpi_card", "title": title, "kpi_card": kpi, "metadata": meta},
+                "kpi_card": kpi,
+                "caption": title,
+                "metadata": meta,
+            }
+
+        if raw_viz_type == "data_table" and viz_res.get("data_table"):
+            tbl = viz_res["data_table"]
+            return {
+                "chart_type": "data_table",
+                "viz_type": "data_table",
+                "title": title,
+                "spec": {"viz_type": "data_table", "title": title, "data_table": tbl, "metadata": meta},
+                "data_table": tbl,
+                "caption": title,
+                "metadata": meta,
+            }
+
+        fig = viz_res.get("figure")
+        if isinstance(fig, dict) and isinstance(fig.get("data"), list) and len(fig["data"]) > 0:
+            return {
+                "chart_type": "historical_sql",
+                "viz_type": "historical_sql",
+                "title": title,
+                "spec": fig,
+                "figure": fig,
+                "caption": title,
+                "metadata": meta,
+            }
+
+        return None
 
     async def stream_query(
         self,
@@ -866,22 +896,42 @@ class RaceEngineerOrchestrator:
 
                     # 1. Trace Event
                     hops = self.a2a.get_hops()
+                    research_provider = (
+                        res_research.get("trace", {}).get("provider")
+                        or res_research.get("provider")
+                        or ("gemini" if res_research.get("grounded") else "ollama_fallback")
+                    )
+                    research_notes = (
+                        "Served from local grounded research cache."
+                        if research_provider == "cache"
+                        else (
+                            "Verified via ResearchAgent with Google Search Grounding."
+                            if res_research.get("grounded")
+                            else "Generated via local Ollama fallback (offline model)."
+                        )
+                    )
                     trace_payload = {
                         "data_domain": "research",
-                        "confidence": 1.0,
+                        "provider": research_provider,
+                        "confidence": 1.0 if res_research.get("grounded") else 0.7,
                         "dataset_id": dataset_id,
                         "a2a_hops": hops,
                         "grounding_sources": res_research.get("sources", []),
                         "grounded": res_research.get("grounded", False),
-                        "notes": "Verified via ResearchAgent with Google Search Grounding.",
+                        "notes": research_notes,
                     }
                     yield format_trace_event(**trace_payload)
 
                     # 2. Chart Event (Web Intelligence Card)
+                    web_card = viz_res.get("web_intelligence_card") or viz_res.get("web_card") or viz_res
+                    web_title = web_card.get("title") or user_message
                     yield format_chart_event(
                         chart_type="web_intelligence_card",
+                        viz_type="web_intelligence_card",
+                        title=web_title,
                         spec=viz_res,
-                        caption=user_message,
+                        web_intelligence_card=web_card,
+                        caption=web_title,
                         metadata=viz_res.get("metadata"),
                     )
 
@@ -927,14 +977,10 @@ class RaceEngineerOrchestrator:
                     cached = _RESPONSE_CACHE[stint_cache_key]
                     yield format_status_event("cached_response", "Retrieving verified race trace from cache...")
                     if cached.get("trace"):
-                        yield format_trace_event(**cached["trace"])
+                        cached_trace = {**cached["trace"], "provider": "cache"}
+                        yield format_trace_event(**cached_trace)
                     if cached.get("chart"):
-                        yield format_chart_event(
-                            cached["chart"]["chart_type"],
-                            cached["chart"]["spec"],
-                            cached["chart"].get("caption", ""),
-                            metadata=cached["chart"].get("metadata"),
-                        )
+                        yield format_chart_event(**cached["chart"])
                     yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
                     words = cached["text"].split(" ")
                     for i in range(0, len(words), 3):
@@ -973,6 +1019,7 @@ class RaceEngineerOrchestrator:
                         hops = self.a2a.get_hops()
                         yield format_trace_event(
                             data_domain="historical",
+                            provider=hist_res.get("provider") or get_active_provider_hint(),
                             query=hist_res["trace"].get("sql", sql),
                             execution_time_ms=hist_res.get("execution_time_ms"),
                             row_count=hist_res.get("row_count"),
@@ -980,13 +1027,12 @@ class RaceEngineerOrchestrator:
                             a2a_hops=hops,
                             notes=f"Tyre stint sensor data unavailable for pre-2023 ({stint_intent['year']}). Retrieved official pit stops from DuckDB.",
                         )
-                        if viz_res.get("figure"):
-                            yield format_chart_event(
-                                chart_type="plotly_figure",
-                                spec=viz_res["figure"],
-                                caption=f"{stint_intent['year']} {stint_intent['grand_prix']} Pit Stops",
-                                metadata=viz_res.get("metadata"),
-                            )
+                        hist_chart_kwargs = self._build_historical_chart_kwargs(
+                            viz_res,
+                            fallback_title=f"{stint_intent['year']} {stint_intent['grand_prix']} Pit Stops",
+                        )
+                        if hist_chart_kwargs:
+                            yield format_chart_event(**hist_chart_kwargs)
 
                         explanation = (
                             f"⚠️ **Telemetry Era Boundary Notice**: Free high-frequency tyre stint sensor data is digitally available for **2023–present** via OpenF1. "
@@ -1036,6 +1082,7 @@ class RaceEngineerOrchestrator:
                 hops = self.a2a.get_hops()
                 trace_payload = {
                     "data_domain": "telemetry",
+                    "provider": get_active_provider_hint(),
                     "confidence": 1.0,
                     "dataset_id": dataset_id,
                     "a2a_hops": hops,
@@ -1047,12 +1094,16 @@ class RaceEngineerOrchestrator:
                 chart_spec = viz_res.get("figure") or stint_res.get("chart", {}).get("spec")
                 chart_meta = viz_res.get("metadata") or stint_res.get("chart", {}).get("metadata")
                 stint_caption = stint_res.get("summary", "Tyre Stint Degradation")
-                yield format_chart_event(
-                    chart_type="tyre_degradation",
-                    spec=chart_spec,
-                    caption=stint_caption,
-                    metadata=chart_meta,
-                )
+                stint_chart_kwargs = {
+                    "chart_type": "tyre_degradation",
+                    "viz_type": "tyre_stints",
+                    "title": f"{stint_intent['year']} {stint_intent['grand_prix']} Tyre Stints",
+                    "spec": chart_spec,
+                    "figure": chart_spec,
+                    "caption": stint_caption,
+                    "metadata": chart_meta,
+                }
+                yield format_chart_event(**stint_chart_kwargs)
 
                 yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
 
@@ -1083,7 +1134,7 @@ class RaceEngineerOrchestrator:
 
                 _RESPONSE_CACHE[stint_cache_key] = {
                     "text": engineer_text,
-                    "chart": {"chart_type": "tyre_degradation", "spec": chart_spec, "caption": stint_caption, "metadata": chart_meta},
+                    "chart": stint_chart_kwargs,
                     "trace": trace_payload,
                 }
                 return
@@ -1104,14 +1155,10 @@ class RaceEngineerOrchestrator:
                     cached = _RESPONSE_CACHE[full_lap_cache_key]
                     yield format_status_event("cached_response", "Retrieving verified race trace from cache...")
                     if cached.get("trace"):
-                        yield format_trace_event(**cached["trace"])
+                        cached_trace = {**cached["trace"], "provider": "cache"}
+                        yield format_trace_event(**cached_trace)
                     if cached.get("chart"):
-                        yield format_chart_event(
-                            cached["chart"]["chart_type"],
-                            cached["chart"]["spec"],
-                            cached["chart"].get("caption", ""),
-                            metadata=cached["chart"].get("metadata"),
-                        )
+                        yield format_chart_event(**cached["chart"])
                     yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
                     words = cached["text"].split(" ")
                     for i in range(0, len(words), 3):
@@ -1149,6 +1196,7 @@ class RaceEngineerOrchestrator:
                         hops = self.a2a.get_hops()
                         yield format_trace_event(
                             data_domain="historical",
+                            provider=hist_res.get("provider") or get_active_provider_hint(),
                             query=hist_res["trace"].get("sql", sql),
                             execution_time_ms=hist_res.get("execution_time_ms"),
                             row_count=hist_res.get("row_count"),
@@ -1156,13 +1204,12 @@ class RaceEngineerOrchestrator:
                             a2a_hops=hops,
                             notes=f"Full-lap telemetry unavailable for pre-2023 ({full_lap_intent['year']}). Retrieved official race results from DuckDB.",
                         )
-                        if viz_res.get("figure"):
-                            yield format_chart_event(
-                                chart_type="plotly_figure",
-                                spec=viz_res["figure"],
-                                caption=f"{full_lap_intent['year']} {full_lap_intent['grand_prix']} Results",
-                                metadata=viz_res.get("metadata"),
-                            )
+                        hist_chart_kwargs = self._build_historical_chart_kwargs(
+                            viz_res,
+                            fallback_title=f"{full_lap_intent['year']} {full_lap_intent['grand_prix']} Results",
+                        )
+                        if hist_chart_kwargs:
+                            yield format_chart_event(**hist_chart_kwargs)
 
                         explanation = (
                             f"⚠️ **Telemetry Era Boundary Notice**: Free high-frequency car sensor telemetry is digitally available for **2023–present** via OpenF1. "
@@ -1212,6 +1259,7 @@ class RaceEngineerOrchestrator:
                 hops = self.a2a.get_hops()
                 trace_payload = {
                     "data_domain": "telemetry",
+                    "provider": get_active_provider_hint(),
                     "confidence": 1.0,
                     "dataset_id": dataset_id,
                     "a2a_hops": hops,
@@ -1222,13 +1270,28 @@ class RaceEngineerOrchestrator:
 
                 chart_spec = viz_res.get("figure") or lap_res.get("chart", {}).get("spec")
                 chart_meta = viz_res.get("metadata") or lap_res.get("chart", {}).get("metadata")
+                d1_lap_time = lap_res.get("driver_1_lap_time") or ""
+                d2_lap_time = lap_res.get("driver_2_lap_time") or ""
+                faster_drv = lap_res.get("faster_driver") or ""
+                if isinstance(chart_meta, dict):
+                    chart_meta = {
+                        **chart_meta,
+                        "driver_1_lap_time": d1_lap_time,
+                        "driver_2_lap_time": d2_lap_time,
+                        "faster_driver": faster_drv,
+                    }
+
                 lap_caption = lap_res.get("summary", "Full-Lap Telemetry Overlay")
-                yield format_chart_event(
-                    chart_type="full_lap_comparison",
-                    spec=chart_spec,
-                    caption=lap_caption,
-                    metadata=chart_meta,
-                )
+                lap_chart_kwargs = {
+                    "chart_type": "full_lap_comparison",
+                    "viz_type": "full_lap",
+                    "title": f"{full_lap_intent['year']} {full_lap_intent['grand_prix']} Full-Lap Overlay",
+                    "spec": chart_spec,
+                    "figure": chart_spec,
+                    "caption": lap_caption,
+                    "metadata": chart_meta,
+                }
+                yield format_chart_event(**lap_chart_kwargs)
 
                 yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
 
@@ -1236,11 +1299,14 @@ class RaceEngineerOrchestrator:
                 fb_text = lap_res.get("summary", "Full-lap telemetry comparison complete.")
                 prompt = (
                     f"User Question: '{user_message}'\n"
-                    f"Full-Lap Telemetry Metrics Summary:\n{lap_res.get('summary')}\n\n"
+                    f"Full-Lap Telemetry Metrics Summary:\n{lap_res.get('summary')}\n"
+                    f"Verified Lap Times: {full_lap_intent['driver1']}={d1_lap_time}, "
+                    f"{full_lap_intent['driver2']}={d2_lap_time}, faster_driver={faster_drv}\n\n"
                     "Instructions:\n"
                     "- Synchronized 4-panel telemetry chart with sector markers is plotted on screen.\n"
                     "- Deliver a concise, high-signal 3 sentence race engineer debrief in authentic F1 pit-wall radio tone.\n"
-                    "- State who set the faster lap of the pair and the finish delta. Never claim someone won qualifying/pole from this 2-driver comparison.\n"
+                    "- Strictly respect faster_driver and verified lap times above: never invert who set the faster lap. "
+                    "If faster_driver is TIE, state both drivers recorded identical lap times. Never claim someone won qualifying/pole from a 2-driver comparison.\n"
                     "- Highlight sector split differences and speed trap delta."
                 )
                 async for chunk in self._stream_commentary_helper(prompt, fb_text, session):
@@ -1258,7 +1324,7 @@ class RaceEngineerOrchestrator:
 
                 _RESPONSE_CACHE[full_lap_cache_key] = {
                     "text": engineer_text,
-                    "chart": {"chart_type": "full_lap_comparison", "spec": chart_spec, "caption": lap_caption, "metadata": chart_meta},
+                    "chart": lap_chart_kwargs,
                     "trace": trace_payload,
                 }
                 return
@@ -1279,21 +1345,12 @@ class RaceEngineerOrchestrator:
                     cached = _RESPONSE_CACHE[corner_cache_key]
                     yield format_status_event("cached_response", "Retrieving verified race trace from cache...")
                     if cached.get("trace"):
-                        yield format_trace_event(**cached["trace"])
+                        cached_trace = {**cached["trace"], "provider": "cache"}
+                        yield format_trace_event(**cached_trace)
                     if cached.get("chart"):
-                        yield format_chart_event(
-                            cached["chart"]["chart_type"],
-                            cached["chart"]["spec"],
-                            cached["chart"].get("caption", ""),
-                            metadata=cached["chart"].get("metadata"),
-                        )
+                        yield format_chart_event(**cached["chart"])
                     if cached.get("minimap"):
-                        yield format_chart_event(
-                            cached["minimap"]["chart_type"],
-                            cached["minimap"]["spec"],
-                            cached["minimap"].get("caption", ""),
-                            metadata=cached["minimap"].get("metadata"),
-                        )
+                        yield format_chart_event(**cached["minimap"])
                     yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
                     words = cached["text"].split(" ")
                     for i in range(0, len(words), 3):
@@ -1331,6 +1388,7 @@ class RaceEngineerOrchestrator:
                         hops = self.a2a.get_hops()
                         yield format_trace_event(
                             data_domain="historical",
+                            provider=hist_res.get("provider") or get_active_provider_hint(),
                             query=hist_res["trace"].get("sql", sql),
                             execution_time_ms=hist_res.get("execution_time_ms"),
                             row_count=hist_res.get("row_count"),
@@ -1338,13 +1396,12 @@ class RaceEngineerOrchestrator:
                             a2a_hops=hops,
                             notes=f"Telemetry unavailable for pre-2023 ({corner_intent['year']}). Retrieved official race results from DuckDB.",
                         )
-                        if viz_res.get("figure"):
-                            yield format_chart_event(
-                                chart_type="plotly_figure",
-                                spec=viz_res["figure"],
-                                caption=f"{corner_intent['year']} {corner_intent['grand_prix']} Results",
-                                metadata=viz_res.get("metadata"),
-                            )
+                        hist_chart_kwargs = self._build_historical_chart_kwargs(
+                            viz_res,
+                            fallback_title=f"{corner_intent['year']} {corner_intent['grand_prix']} Results",
+                        )
+                        if hist_chart_kwargs:
+                            yield format_chart_event(**hist_chart_kwargs)
 
                         explanation = (
                             f"⚠️ **Telemetry Era Boundary Notice**: Free high-frequency car sensor telemetry (ECU speed, throttle, brake, gear) "
@@ -1424,6 +1481,7 @@ class RaceEngineerOrchestrator:
                 hops = self.a2a.get_hops()
                 trace_payload = {
                     "data_domain": "telemetry",
+                    "provider": get_active_provider_hint(),
                     "confidence": 1.0,
                     "dataset_id": dataset_id,
                     "a2a_hops": hops,
@@ -1436,23 +1494,32 @@ class RaceEngineerOrchestrator:
                 chart_spec = viz_res.get("figure") or corner_res.get("chart", {}).get("spec")
                 chart_meta = viz_res.get("metadata") or corner_res.get("chart", {}).get("metadata")
                 corner_caption = corner_res.get("summary", f"{corner_intent['corner']} Telemetry")
-                yield format_chart_event(
-                    chart_type="corner_comparison",
-                    spec=chart_spec,
-                    caption=corner_caption,
-                    metadata=chart_meta,
-                )
+                corner_chart_kwargs = {
+                    "chart_type": "corner_comparison",
+                    "viz_type": "corner_telemetry",
+                    "title": f"{corner_intent['year']} {corner_intent['grand_prix']} — {corner_intent['corner']}",
+                    "spec": chart_spec,
+                    "figure": chart_spec,
+                    "caption": corner_caption,
+                    "metadata": chart_meta,
+                }
+                yield format_chart_event(**corner_chart_kwargs)
 
                 # Emit mini-map if available
                 minimap_spec = viz_res.get("minimap") or corner_res.get("minimap", {}).get("spec")
                 minimap_caption = f"{corner_intent['grand_prix']} Track Layout"
+                minimap_kwargs = None
                 if minimap_spec:
-                    yield format_chart_event(
-                        chart_type="track_minimap",
-                        spec=minimap_spec,
-                        caption=minimap_caption,
-                        metadata=chart_meta,
-                    )
+                    minimap_kwargs = {
+                        "chart_type": "track_minimap",
+                        "viz_type": "track_minimap",
+                        "title": minimap_caption,
+                        "spec": minimap_spec,
+                        "figure": minimap_spec,
+                        "caption": minimap_caption,
+                        "metadata": chart_meta,
+                    }
+                    yield format_chart_event(**minimap_kwargs)
 
                 yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
 
@@ -1483,8 +1550,8 @@ class RaceEngineerOrchestrator:
 
                 _RESPONSE_CACHE[corner_cache_key] = {
                     "text": engineer_text,
-                    "chart": {"chart_type": "corner_comparison", "spec": chart_spec, "caption": corner_caption, "metadata": chart_meta},
-                    "minimap": {"chart_type": "track_minimap", "spec": minimap_spec, "caption": minimap_caption, "metadata": chart_meta} if minimap_spec else None,
+                    "chart": corner_chart_kwargs,
+                    "minimap": minimap_kwargs,
                     "trace": trace_payload,
                 }
                 return
@@ -1556,8 +1623,14 @@ class RaceEngineerOrchestrator:
             )
 
             hops = self.a2a.get_hops()
+            hist_provider = (
+                hist_res.get("trace", {}).get("provider")
+                or hist_res.get("provider")
+                or get_active_provider_hint()
+            )
             trace_payload = {
                 "data_domain": "historical",
+                "provider": hist_provider,
                 "query": hist_res.get("trace", {}).get("sql", sql_to_run),
                 "execution_time_ms": hist_res.get("execution_time_ms"),
                 "row_count": hist_res.get("row_count"),
@@ -1568,27 +1641,23 @@ class RaceEngineerOrchestrator:
             }
             yield format_trace_event(**trace_payload)
 
-            hist_caption = hist_res.get("summary", user_message)
-            if viz_res.get("figure"):
-                yield format_chart_event(
-                    chart_type=viz_res.get("chart_type", "historical_sql"),
-                    spec=viz_res["figure"],
-                    caption=hist_caption,
-                    metadata=viz_res.get("metadata"),
-                )
+            hist_caption = viz_res.get("title") or hist_res.get("summary") or user_message
+            hist_chart_kwargs = self._build_historical_chart_kwargs(viz_res, fallback_title=user_message)
+            if hist_chart_kwargs:
+                yield format_chart_event(**hist_chart_kwargs)
 
             yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
 
             engineer_text = ""
-            fb_text = hist_res.get("summary", f"Confirmed on timing data: {hist_res.get('row_count', 0)} verified records retrieved.")
+            clean_hist_summary = viz_res.get("summary") or hist_res.get("summary") or f"Confirmed on timing data: {hist_res.get('row_count', 0)} verified records."
+            fb_text = clean_hist_summary
             prompt = (
                 f"User Question: '{user_message}'\n"
-                f"Historical Records Summary:\n{hist_res.get('summary')}\n\n"
+                f"Verified Historical Data:\n{clean_hist_summary}\n\n"
                 "Instructions:\n"
-                "- A chart or table is already plotted on the user's screen. Do not recite every row.\n"
-                "- Provide a concise, high-signal 2 to 3 sentence race engineer summary in authentic F1 radio tone.\n"
-                "- Direct answer first, followed by key totals and notable records.\n"
-                "- Strictly quote exact numbers from the summary."
+                "- A KPI card, data table, or chart is already displayed on screen. Do not recite internal schema details or IDs.\n"
+                "- Provide a concise, high-signal 1 to 3 sentence race engineer answer in authentic F1 pit-wall radio tone.\n"
+                "- Direct answer first, quoting exact verified names, teams, positions, and times."
             )
             async for chunk in self._stream_commentary_helper(prompt, fb_text, session):
                 yield format_text_event(chunk)
@@ -1599,11 +1668,12 @@ class RaceEngineerOrchestrator:
             session.update_entities(tool="historical_sql")
 
             cache_key = f"sql:{hashlib.sha256(user_message.strip().lower().encode('utf-8')).hexdigest()}"
-            _RESPONSE_CACHE[cache_key] = {
-                "text": engineer_text,
-                "chart": {"chart_type": "historical_sql", "spec": viz_res.get("figure"), "caption": hist_caption, "metadata": viz_res.get("metadata")},
-                "trace": trace_payload,
-            }
+            if hist_chart_kwargs:
+                _RESPONSE_CACHE[cache_key] = {
+                    "text": engineer_text,
+                    "chart": hist_chart_kwargs,
+                    "trace": trace_payload,
+                }
             return
 
         except Exception as e:

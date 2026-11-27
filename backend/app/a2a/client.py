@@ -94,13 +94,13 @@ class A2AClient:
                 self._client = httpx.AsyncClient(
                     transport=transport,
                     base_url="http://pitwall.internal",
-                    timeout=60.0,
+                    timeout=180.0,
                 )
             else:
-                base = self.env_base_url or "http://localhost:8000"
+                base = self.env_base_url or "http://127.0.0.1:8000"
                 self._client = httpx.AsyncClient(
                     base_url=base,
-                    timeout=60.0,
+                    timeout=180.0,
                 )
         return self._client
 

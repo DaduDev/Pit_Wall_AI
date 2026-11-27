@@ -38,6 +38,23 @@ export interface WebIntelligenceCardData {
   bullets?: string[];
   sources: WebSource[];
   grounded?: boolean;
+  provider?: 'gemini' | 'ollama_fallback' | 'cache' | string;
+}
+
+export interface KpiMetric {
+  label: string;
+  value: string;
+}
+
+export interface KpiCardData {
+  subtitle?: string;
+  metrics: KpiMetric[];
+}
+
+export interface DataTableData {
+  subtitle?: string;
+  columns: string[];
+  rows: Record<string, any>[];
 }
 
 export interface EngineeringTrace {
@@ -49,6 +66,7 @@ export interface EngineeringTrace {
   a2a_hops?: A2AHop[];
   grounding_sources?: WebSource[];
   grounded?: boolean;
+  provider?: 'gemini' | 'ollama_fallback' | 'cache' | string;
   telemetry_params?: {
     year?: number;
     grand_prix?: string;
@@ -126,7 +144,7 @@ export interface SectorSummary {
 }
 
 export interface ChartMetadata {
-  domain?: 'historical' | 'telemetry' | 'mixed';
+  domain?: 'historical' | 'historical_sql' | 'telemetry' | 'mixed' | 'research';
   year?: number;
   grand_prix?: string;
   session_name?: string;
@@ -154,8 +172,11 @@ export interface PlotlySpec {
   config?: Record<string, any>;
   viz_type?: string;
   chart_type?: string;
+  title?: string;
   figure?: any;
   minimap?: any;
+  kpi_card?: KpiCardData;
+  data_table?: DataTableData;
   web_intelligence_card?: WebIntelligenceCardData;
   metadata?: ChartMetadata;
 }

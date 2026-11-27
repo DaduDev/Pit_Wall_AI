@@ -18,6 +18,7 @@ import numpy as np
 from google.adk.agents.llm_agent import LlmAgent
 from a2a.types import AgentCard, AgentSkill, AgentInterface
 
+from backend.app.config import settings
 from backend.app.a2a.artifact_store import get_artifact_store
 from backend.app.data.circuit_corners import get_circuit_corner_engine
 from backend.app.data.openf1_client import get_openf1_client
@@ -49,7 +50,7 @@ class TelemetryAgent:
         """Create ADK LlmAgent wrapper."""
         return LlmAgent(
             name=self.name,
-            model="gemini-3.8-flash",
+            model=settings.GEMINI_MODEL,
             instruction=(
                 "You are the PitWall AI Telemetry & Strategy Engineer. Analyze high-frequency car sensor "
                 "telemetry (speed, throttle, brake, gear, delta) and tyre stint degradation for 2023-present "
@@ -173,8 +174,7 @@ class TelemetryAgent:
                 "corner_info": corner_res,
                 "summary": (
                     f"Corner comparison for {driver_1} vs {driver_2} at {grand_prix} {corner_nick} (Turn {turn_num}) "
-                    f"computed successfully. Apex speeds: {apex_summary_str}. "
-                    f"Stored in artifact '{dataset_id}'."
+                    f"computed successfully. Apex speeds: {apex_summary_str}."
                 ),
                 "trace": base_res.get("trace", {}),
             }
@@ -234,16 +234,36 @@ class TelemetryAgent:
                 ttl_seconds=3600,
             )
 
-            lap_delta = base_res.get("metrics", {}).get("lap_times", {}).get("delta_s", 0)
+            lap_times = base_res.get("metrics", {}).get("lap_times", {})
+            lap_delta = lap_times.get("delta_s", 0)
+            t1_sec = lap_times.get("driver_a")
+            t2_sec = lap_times.get("driver_b")
+            d1_time_str = lap_times.get("driver_1_lap_time") or (f"{t1_sec:.3f}s" if t1_sec is not None else "N/A")
+            d2_time_str = lap_times.get("driver_2_lap_time") or (f"{t2_sec:.3f}s" if t2_sec is not None else "N/A")
+
+            if isinstance(t1_sec, (int, float)) and isinstance(t2_sec, (int, float)):
+                if abs(float(t1_sec) - float(t2_sec)) < 0.0005:
+                    faster_driver = "TIE"
+                elif float(t1_sec) < float(t2_sec):
+                    faster_driver = driver_1.upper()
+                else:
+                    faster_driver = driver_2.upper()
+            else:
+                faster_driver = lap_times.get("faster_driver") or lap_times.get("faster") or "N/A"
+
             return {
                 "success": True,
                 "domain": "full_lap_telemetry",
                 "dataset_id": dataset_id,
+                "driver_1_lap_time": d1_time_str,
+                "driver_2_lap_time": d2_time_str,
+                "faster_driver": faster_driver,
                 "metrics": base_res.get("metrics"),
                 "summary": (
-                    f"Full lap telemetry overlay for {driver_1} vs {driver_2} at {grand_prix} {year} "
-                    f"computed successfully. Lap delta: {lap_delta:.3f}s. "
-                    f"Stored in artifact '{dataset_id}'."
+                    f"Full-lap comparison for {driver_1} vs {driver_2} at {grand_prix} {year}: "
+                    f"driver_1_lap_time={d1_time_str} ({driver_1}), "
+                    f"driver_2_lap_time={d2_time_str} ({driver_2}), "
+                    f"faster_driver={faster_driver}, lap_delta={lap_delta:+.3f}s."
                 ),
                 "trace": base_res.get("trace", {}),
             }
@@ -310,8 +330,7 @@ class TelemetryAgent:
                 "metrics": base_res.get("metrics"),
                 "drivers_data": drivers_data,
                 "summary": (
-                    f"Tyre stint degradation analysis for {', '.join(resolved_drivers)} at {grand_prix} {year} completed. "
-                    f"Stored in artifact '{dataset_id}'."
+                    f"Tyre stint degradation analysis for {', '.join(resolved_drivers)} at {grand_prix} {year} completed."
                 ),
                 "trace": base_res.get("trace", {}),
             }

@@ -265,6 +265,34 @@
 
 ---
 
+## Phase 12: HUD Visual Cards, SSE `viz_type`, Thinking Latency & Full-Lap Attribution
+
+**Purpose**: Eliminate blank Plotly fallbacks and raw internal text leaks, preserve top-level `viz_type` on SSE `chart` events, trim `HistoricalSQLAgent` / `PitWallEngineer` thinking delay while keeping `.env` model config untouched, and fix full-lap faster-driver attribution.
+
+- [x] T097 Update `PresentationAgent` (`backend/app/a2a/agents/presentation_agent.py`) and `HistoricalSQLAgent` (`backend/app/a2a/agents/historical_agent.py`) so `row_count == 1` returns `{ viz_type: "kpi_card", title: "<clean human title>", kpi_card: { subtitle: "<race/year>", metrics: [{ label, value }] } }`, `row_count >= 2` without sensible numeric y-axis bar chart returns `viz_type: "data_table"`, and zero blank `data: []` Plotly grids or raw `"Retrieved X rows..."` / `"Dataset stored under dataset_id=..."` strings leak into `layout.title` or chat `text`
+- [x] T098 Update `backend/app/chat/streaming.py` and `backend/app/agent/orchestrator.py` so every SSE `chart` event preserves top-level `viz_type` (`"corner_telemetry"`, `"full_lap"`, `"tyre_stints"`, `"historical_sql"`, `"kpi_card"`, `"data_table"`, `"web_intelligence_card"`) alongside `figure`, `kpi_card`, `data_table`, or `web_intelligence_card`
+- [x] T099 Optimize thinking configuration (`thinking_budget=0` for Gemini 2.5 Flash or lowest supported `thinking_level`, safely guarded) in `HistoricalSQLAgent` and `PitWallEngineer` without altering `.env` `GEMINI_MODEL`
+- [x] T100 Update `TelemetryAgent.compare_full_lap` (`backend/app/a2a/agents/telemetry_agent.py`) and `orchestrator.py` to emit explicit `driver_1_lap_time`, `driver_2_lap_time`, and `faster_driver` fields in specialist metrics/summary
+- [x] T101 Implement `KpiCard.tsx` and `DataTableCard.tsx` in `frontend/src/components/ChartStage/` (`#0B0F17` HUD) and update `ChartStage.tsx`, `useSSEStream.ts`, and `frontend/src/types/index.ts` to switch cleanly on `viz_type` without mounting empty `<Plot>` instances
+- [x] T102 Add regression tests in `backend/tests/` verifying 1-row Brazil 2021 SQL returns `viz_type == "kpi_card"` with zero raw `dataset_id`/`Retrieved 1 rows` text leaks, web research preserves `viz_type == "web_intelligence_card"`, and full-lap summary explicitly names the faster driver
+- [x] T103 Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`, recording before/after `HistoricalSQLAgent` latency
+
+---
+
+## Phase 13: Unified Gemini → Local Ollama Failover, Research Cache & Quota Guard
+
+**Purpose**: Eliminate leaked `429 RESOURCE_EXHAUSTED` JSON errors, guarantee automatic Gemini -> local Ollama (`qwen3.5:4b`) failover across `PitWallEngineer`, `HistoricalSQLAgent`, and `ResearchAgent`, add disk caching in `./data/research_cache/`, show accurate provider/fallback badges in React HUD, and protect Gemini quota during `pytest`.
+
+- [x] T104 Create shared `backend/app/llm/` client module supporting env-driven Gemini / Vertex AI (`GEMINI_API_KEY`, `GEMINI_MODEL`, `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`) with automatic Ollama failover (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`), clean server-side `logger.warning`, zero traceback leaks, and `"provider": "gemini" | "ollama_fallback" | "cache"` attribution
+- [x] T105 Wire `PitWallEngineer` (`backend/app/agent/orchestrator.py`), `HistoricalSQLAgent` (`backend/app/a2a/agents/historical_agent.py`), and `ResearchAgent` (`backend/app/a2a/agents/research_agent.py`) to use `backend/app/llm/`, stream/emit `"provider"` in SSE `trace` events, and strip empty/whitespace bullets
+- [x] T106 Add `./data/research_cache/` persistent disk cache + Ollama offline summarization fallback in `ResearchAgent` in strict priority order (cache -> Gemini Google Search -> Ollama -> clean unreachable message)
+- [x] T107 Update `frontend/src/components/ChartStage/WebIntelligenceCard.tsx`, `frontend/src/components/EngineeringTrace/TraceDrawer.tsx`, and `frontend/src/types/index.ts` to render `"Google Search Grounding"` only when `grounded === true`, `"Local Ollama Fallback (Offline Model)"` when `grounded === false`, and `trace.provider` badge in Engineering Trace
+- [x] T108 Add default pytest Gemini `google_search` quota protection (`RUN_LIVE_GROUNDING=1` opt-in) plus unit tests for `429 RESOURCE_EXHAUSTED` -> Ollama failover, clean bullet stripping, and `./data/research_cache/` cache hit; run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`
+- [x] T109 Enforce IPv4 `127.0.0.1` Ollama defaults, `"think": False` & `"keep_alive": "15m"` Ollama `/api/chat` payloads, `90.0s` (`connect=5.0`) Ollama timeouts across `failover_client.py` / specialists / orchestrator, `120.0s` A2A client timeouts, and full prefix/blank bullet stripping across `research_agent.py`, `presentation_agent.py`, and `WebIntelligenceCard.tsx`
+- [x] T110 Cap Ollama CPU context/generation (`"options": {"num_ctx": 1024, "num_predict": 180, "temperature": 0.3}`), bump Ollama timeouts to `150.0s` (`180.0s` A2A hop timeout), add 60s Gemini `429 RESOURCE_EXHAUSTED` cooldown & elapsed-time exception logging in `failover_client.py`, keep `ResearchAgent` prompt concise (~120 words), eliminate alternating blank `- ` bullets cleanly, and verify with `pytest` + `npm run build`
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

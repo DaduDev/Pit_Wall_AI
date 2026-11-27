@@ -10,8 +10,11 @@ Handles:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
+from pathlib import Path
 import re
 import time
 from typing import Any, Dict, List, Optional
@@ -20,33 +23,81 @@ from google.adk.agents.llm_agent import LlmAgent
 from a2a.types import AgentCard, AgentSkill, AgentInterface
 
 from backend.app.config import settings
+from backend.app.llm import generate_with_failover, get_gemini_config
 from backend.app.a2a.artifact_store import get_artifact_store
 from backend.app.data.circuit_corners import get_circuit_corner_engine
 
 logger = logging.getLogger("pitwall.a2a.research")
 
 
+def sanitize_bullets(raw_items: Any) -> List[str]:
+    """
+    Normalize a list of bullet strings or newline-separated lines:
+    splits embedded newlines, strips repeated '-', '*', '•', or '1.' prefixes,
+    and drops empty/punctuation-only rows so stray blank '- ' lines never render.
+    """
+    if not isinstance(raw_items, (list, tuple)):
+        return []
+    cleaned: List[str] = []
+    for item in raw_items:
+        if not isinstance(item, str):
+            continue
+        for subline in item.splitlines():
+            s = subline.replace("\u200b", "").replace("\ufeff", "").strip()
+            while s:
+                next_s = re.sub(r"^(?:[-•*–—]+|\d+[.)]+)\s*", "", s).strip()
+                if next_s == s:
+                    break
+                s = next_s
+            if not s or re.fullmatch(r"[-•*–—.\s]+", s):
+                continue
+            cleaned.append(s)
+    return cleaned
+
+
+def sanitize_summary_text(text: str) -> str:
+    """Remove standalone empty bullet lines ('- ', '* ') from research summary text."""
+    lines = [
+        line for line in (text or "").splitlines()
+        if not re.fullmatch(r"\s*[-•*–—]+\s*", line)
+    ]
+    return "\n".join(lines).strip()
+
+
+def _extract_clean_bullets(text: str) -> List[str]:
+    """
+    Extract bullet takeaways cleanly from markdown or plain prose, stripping leading list markers
+    and dropping any empty or whitespace-only entries (prevents blank '- ' bullets).
+    """
+    candidate_lines: List[str] = []
+    for raw_line in (text or "").splitlines():
+        s = raw_line.replace("\u200b", "").replace("\ufeff", "").strip()
+        if not s:
+            continue
+        if s.startswith(("-", "•", "*", "–", "—")) or re.match(r"^\d+[\.\)]\s+", s):
+            candidate_lines.append(s)
+
+    bullets = sanitize_bullets(candidate_lines)
+    if not bullets and (text or "").strip():
+        clean_prose = sanitize_summary_text(text)
+        sentences = [seg.strip() for seg in re.split(r"(?<=[.!?])\s+", clean_prose) if seg.strip()]
+        bullets = sanitize_bullets([s for s in sentences[:3] if len(s) > 3])
+
+    return bullets
+
+
 class ResearchAgent:
     """Specialist agent for web intelligence and corner nickname discovery."""
 
-    def __init__(self, name: str = "research_agent"):
+    def __init__(self, name: str = "research_agent", cache_dir: Optional[Path] = None):
         self.name = name
         self.artifact_store = get_artifact_store()
         self.corner_engine = get_circuit_corner_engine()
-        self.api_key = (
-            os.environ.get("GOOGLE_API_KEY")
-            or os.environ.get("GEMINI_API_KEY")
-            or getattr(settings, "GOOGLE_API_KEY", "")
-            or getattr(settings, "GEMINI_API_KEY", "")
-        )
-        if not self.api_key:
-            try:
-                from dotenv import dotenv_values
-                env_vals = dotenv_values(".env")
-                self.api_key = env_vals.get("GOOGLE_API_KEY") or env_vals.get("GEMINI_API_KEY") or ""
-            except Exception:
-                pass
-        self.has_gemini = bool(self.api_key)
+        self.cache_dir = Path(cache_dir or getattr(settings, "RESEARCH_CACHE_DIR", Path("./data/research_cache")))
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        cfg = get_gemini_config()
+        self.api_key = cfg.get("api_key", "")
+        self.has_gemini = bool(self.api_key or cfg.get("use_vertex"))
         self.adk_agent = self._build_adk_agent()
 
     def _build_adk_agent(self) -> LlmAgent:
@@ -54,7 +105,7 @@ class ResearchAgent:
         tools = [self.research_topic, self.resolve_and_learn_corner]
         return LlmAgent(
             name=self.name,
-            model="gemini-3.8-flash" if self.has_gemini else "ollama_chat/qwen3.5:4b",
+            model=settings.GEMINI_MODEL if self.has_gemini else f"ollama_chat/{settings.OLLAMA_MODEL}",
             instruction=(
                 "You are the PitWall AI Research Engineer. Search live web sources for off-dataset F1 inquiries "
                 "such as regulations, driver quotes, weather forecasts, technical upgrades, and track corner designations. "
@@ -63,10 +114,44 @@ class ResearchAgent:
             tools=tools,
         )
 
+    def _cache_path_for_query(self, query: str) -> Path:
+        norm = re.sub(r"\s+", " ", query.strip().lower())
+        key = hashlib.sha256(norm.encode("utf-8")).hexdigest()
+        return self.cache_dir / f"{key}.json"
+
+    def _read_research_cache(self, query: str) -> Optional[Dict[str, Any]]:
+        path = self._cache_path_for_query(query)
+        if not path.exists():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data.get("grounded") is True and data.get("sources"):
+                return data
+        except Exception as e:
+            logger.warning(f"Failed reading research cache {path}: {e}")
+        return None
+
+    def _write_research_cache(self, query: str, payload: Dict[str, Any]) -> None:
+        if not payload.get("grounded") or not payload.get("sources"):
+            return
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        path = self._cache_path_for_query(query)
+        tmp = path.with_suffix(".tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            tmp.replace(path)
+        except Exception as e:
+            logger.warning(f"Failed writing research cache {path}: {e}")
+
     def research_topic(self, query: str) -> Dict[str, Any]:
         """
-        Execute web research on an F1 topic.
-        If Gemini grounding is available, runs grounded search; otherwise uses structured offline fallback.
+        Execute web research on an F1 topic in strict priority order:
+        1) Persistent Disk Cache (./data/research_cache/) for previously grounded queries (0 API calls)
+        2) Gemini + Google Search Grounding (saves grounded results to disk cache)
+        3) Local Ollama Fallback (qwen3.5:4b) on 429 / network error (grounded=False, provider='ollama_fallback')
+        4) Clean fallback notice if Ollama is also unreachable (zero raw tracebacks/JSON leaks).
         """
         t_start = time.perf_counter()
 
@@ -74,86 +159,69 @@ class ResearchAgent:
         findings: List[str] = []
         summary = ""
         is_grounded = False
+        provider = "gemini"
 
-        if not self.has_gemini:
-            # Offline / local Ollama mode fallback
-            summary = (
-                f"Web search is unavailable in offline/local LLM mode. "
-                f"General domain context for '{query}': Formula 1 regulations, historical statistics, and race data "
-                f"are accessible via historical DuckDB views and cached telemetry."
-            )
-            findings = [
-                "Live web grounding requires active GOOGLE_API_KEY or GEMINI_API_KEY.",
-                "Offline dataset contains all official F1 race results (1950–2024+) and car telemetry (2023+).",
-            ]
-            sources = [{"title": "PitWall AI Offline Knowledge", "url": "local://pitwall-db", "uri": "local://pitwall-db"}]
+        # Step 1: Persistent Disk Cache (0 API quota spent)
+        cached = self._read_research_cache(query)
+        if cached:
+            summary = sanitize_summary_text(cached.get("summary", ""))
+            findings = sanitize_bullets(cached.get("findings", []))
+            if not findings:
+                findings = _extract_clean_bullets(summary)
+            sources = cached.get("sources", [])
+            is_grounded = True
+            provider = "cache"
         else:
-            try:
-                from google import genai
-                from google.genai import types
+            # Step 2 -> Step 3 -> Step 4 via Unified Failover Client
+            prompt = (
+                f"Formula 1 research question: {query}\n"
+                "Reply concisely (max 120 words): 1-2 short summary sentences followed by "
+                "2-3 brief factual bullet points formatted as '- fact'."
+            )
+            llm_res = generate_with_failover(
+                prompt,
+                use_google_search=True,
+                ollama_timeout=150.0,
+            )
 
-                client = genai.Client(api_key=self.api_key)
-                prompt = (
-                    f"You are a Formula 1 research specialist. Answer this question concisely with exact facts: {query}\n"
-                    f"Cite specific race events, driver quotes, regulations, or dates where applicable."
-                )
-
-                # Generate content with google search grounding tool
-                # Attempt primary models, falling back to grounding-compatible Flash/preview models
-                response = None
-                models_to_try = [
-                    "gemini-3.8-flash",
-                    "gemini-3.5-flash-lite",
-                    "gemini-3.5-flash",
-                    "gemini-flash-latest",
-                    "gemini-robotics-er-2-preview",
-                ]
-                last_err = None
-
-                for model_candidate in models_to_try:
-                    try:
-                        response = client.models.generate_content(
-                            model=model_candidate,
-                            contents=prompt,
-                            config=types.GenerateContentConfig(
-                                tools=[types.Tool(google_search=types.GoogleSearch())],
-                            ),
-                        )
-                        if response:
-                            break
-                    except Exception as try_err:
-                        last_err = try_err
-                        logger.warning(f"Search grounding attempt with {model_candidate} failed: {try_err}")
-
-                if response is None:
-                    raise last_err or RuntimeError("No response returned from Gemini models")
-
-                summary = response.text or "No text generated."
-
-                # Extract grounding metadata sources if returned
-                if response.candidates and response.candidates[0].grounding_metadata:
-                    gm = response.candidates[0].grounding_metadata
-                    if gm.grounding_chunks:
-                        for chunk in gm.grounding_chunks:
-                            if chunk.web:
-                                link_url = chunk.web.uri or ""
-                                sources.append({
-                                    "title": chunk.web.title or "F1 Reference",
-                                    "url": link_url,
-                                    "uri": link_url,
-                                })
-                                is_grounded = True
-
-                findings = [line.strip() for line in summary.split("\n") if line.strip().startswith(("-", "•", "*", "1.", "2."))]
-                if not findings:
-                    findings = [summary[:200] + "..."]
-
-            except Exception as e:
-                logger.exception(f"Gemini grounding search error: {e}")
-                summary = f"Research inquiry processed with offline fallback: {query}"
-                findings = [f"Web search unavailable: {str(e)}"]
-                sources = [{"title": "Formula 1 Regulations & Historical Archive", "url": "https://www.formula1.com", "uri": "https://www.formula1.com"}]
+            if llm_res.provider == "gemini" and llm_res.text:
+                summary = sanitize_summary_text(llm_res.text)
+                sources = llm_res.sources
+                is_grounded = bool(llm_res.grounded and sources)
+                findings = _extract_clean_bullets(summary)
+                provider = "gemini"
+                if is_grounded and sources:
+                    self._write_research_cache(
+                        query,
+                        {
+                            "query": query,
+                            "summary": summary,
+                            "findings": findings,
+                            "sources": sources,
+                            "grounded": True,
+                            "cached_at": time.time(),
+                        },
+                    )
+            elif llm_res.text:
+                # Step 3: Local Ollama Fallback succeeded
+                summary = sanitize_summary_text(llm_res.text)
+                findings = _extract_clean_bullets(summary)
+                sources = []
                 is_grounded = False
+                provider = "ollama_fallback"
+            else:
+                # Step 4: Both Gemini and local Ollama are unreachable -> clean user notice
+                summary = (
+                    f"Live web search and the local fallback model are temporarily unavailable for '{query}'. "
+                    f"Please retry shortly or ensure local Ollama is running."
+                )
+                findings = [
+                    "Live web grounding is temporarily rate-limited or offline.",
+                    "Local Ollama fallback model could not be reached at this moment.",
+                ]
+                sources = []
+                is_grounded = False
+                provider = "ollama_fallback"
 
         exec_time = round((time.perf_counter() - t_start) * 1000, 2)
 
@@ -163,6 +231,7 @@ class ResearchAgent:
             "query": query,
             "sources_count": len(sources),
             "grounded": is_grounded,
+            "provider": provider,
         }
         dataset_id = self.artifact_store.put(
             data={
@@ -171,6 +240,7 @@ class ResearchAgent:
                 "findings": findings,
                 "sources": sources,
                 "grounded": is_grounded,
+                "provider": provider,
             },
             metadata=dataset_metadata,
             ttl_seconds=3600,
@@ -182,6 +252,7 @@ class ResearchAgent:
             "key_findings": findings,
             "sources": sources,
             "grounded": is_grounded,
+            "provider": provider,
             "confidence": 0.95 if is_grounded else 0.70,
         }
 
@@ -193,12 +264,14 @@ class ResearchAgent:
             "web_card": web_card,
             "sources": sources,
             "grounded": is_grounded,
+            "provider": provider,
             "execution_time_ms": exec_time,
             "trace": {
                 "data_domain": "research",
                 "query": query,
                 "sources_count": len(sources),
-                "grounding_provider": "gemini_google_search" if is_grounded else "offline_knowledge",
+                "provider": provider,
+                "grounding_provider": "gemini_google_search" if is_grounded else ("cache" if provider == "cache" else "ollama_fallback"),
             },
         }
 

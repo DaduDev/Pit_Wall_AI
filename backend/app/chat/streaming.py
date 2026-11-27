@@ -54,23 +54,65 @@ def format_text_event(delta: str) -> str:
     return sse_message("text", {"delta": delta})
 
 
+def _infer_viz_type(chart_type: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    """Map internal chart_type / domain strings to canonical top-level viz_type labels."""
+    mapping = {
+        "corner_comparison": "corner_telemetry",
+        "corner_telemetry": "corner_telemetry",
+        "full_lap_comparison": "full_lap",
+        "full_lap": "full_lap",
+        "full_lap_telemetry": "full_lap",
+        "tyre_degradation": "tyre_stints",
+        "tyre_stints": "tyre_stints",
+        "historical_sql": "historical_sql",
+        "kpi_card": "kpi_card",
+        "data_table": "data_table",
+        "web_intelligence_card": "web_intelligence_card",
+        "track_minimap": "track_minimap",
+    }
+    if chart_type in mapping:
+        return mapping[chart_type]
+    if metadata and metadata.get("domain") == "historical":
+        return "historical_sql"
+    return chart_type
+
+
 def format_chart_event(
     chart_type: str,
-    spec: Dict[str, Any],
+    spec: Optional[Dict[str, Any]],
     caption: str = "",
     metadata: Optional[Dict[str, Any]] = None,
+    viz_type: Optional[str] = None,
+    title: Optional[str] = None,
+    figure: Optional[Dict[str, Any]] = None,
+    kpi_card: Optional[Dict[str, Any]] = None,
+    data_table: Optional[Dict[str, Any]] = None,
+    web_intelligence_card: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Emitted once a Plotly JSON specification is generated."""
+    """Emitted once a visualization or HUD card is generated. Always preserves top-level viz_type."""
     meta = metadata or (spec.get("metadata") if isinstance(spec, dict) else {}) or {}
-    return sse_message(
-        "chart",
-        {
-            "chart_type": chart_type,
-            "spec": spec,
-            "caption": caption,
-            "metadata": meta,
-        },
-    )
+    resolved_viz_type = viz_type or (spec.get("viz_type") if isinstance(spec, dict) else None) or _infer_viz_type(chart_type, meta)
+
+    payload: Dict[str, Any] = {
+        "viz_type": resolved_viz_type,
+        "chart_type": chart_type,
+        "title": title or caption or "",
+        "spec": spec,
+        "caption": caption,
+        "metadata": meta,
+    }
+    if figure is not None:
+        payload["figure"] = figure
+    elif isinstance(spec, dict) and "data" in spec and "layout" in spec:
+        payload["figure"] = spec
+    if kpi_card is not None:
+        payload["kpi_card"] = kpi_card
+    if data_table is not None:
+        payload["data_table"] = data_table
+    if web_intelligence_card is not None:
+        payload["web_intelligence_card"] = web_intelligence_card
+
+    return sse_message("chart", payload)
 
 
 def format_trace_event(

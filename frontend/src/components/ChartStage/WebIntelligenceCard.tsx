@@ -10,9 +10,30 @@ export function WebIntelligenceCard({ card }: WebIntelligenceCardProps) {
     return null;
   }
 
-  const isGrounded = card.grounded ?? true;
-  const sources = card.sources || [];
-  const bullets = card.bullets || [];
+  const isGrounded = card.grounded === true;
+  const sources = Array.isArray(card.sources) ? card.sources : [];
+  const bullets = Array.isArray(card.bullets)
+    ? card.bullets
+        .flatMap((b) => (typeof b === 'string' ? b.split(/\r?\n/) : []))
+        .map((line) => {
+          let s = line.replace(/[\u200B\uFEFF]/g, '').trim();
+          while (s) {
+            const next = s.replace(/^(?:[-•*–—]+|\d+[.)]+)\s*/, '').trim();
+            if (next === s) break;
+            s = next;
+          }
+          return s.replace(/\s+/g, ' ').trim();
+        })
+        .filter((s) => s.length > 0 && !/^[-•*–—.\s]+$/.test(s))
+    : [];
+
+  const cleanSummary = typeof card.summary === 'string'
+    ? card.summary
+        .split(/\r?\n/)
+        .filter((line) => !/^\s*[-•*–—]+\s*$/.test(line))
+        .join('\n')
+        .trim()
+    : '';
 
   return (
     <div className="rounded-lg border border-[#1E293B] bg-[#0E1420] p-6 shadow-xl space-y-6">
@@ -32,7 +53,7 @@ export function WebIntelligenceCard({ card }: WebIntelligenceCardProps) {
           </div>
         </div>
 
-        {/* Google Search Grounding Badge */}
+        {/* Google Search Grounding / Ollama Fallback Badge */}
         <div className="flex items-center space-x-2">
           {isGrounded ? (
             <div className="flex items-center space-x-1.5 rounded-full border border-emerald-500/30 bg-emerald-950/40 px-3 py-1 text-xs font-mono text-emerald-400">
@@ -46,7 +67,7 @@ export function WebIntelligenceCard({ card }: WebIntelligenceCardProps) {
           ) : (
             <div className="flex items-center space-x-1.5 rounded-full border border-amber-500/30 bg-amber-950/40 px-3 py-1 text-xs font-mono text-amber-400">
               <ShieldCheck className="h-3 w-3" />
-              <span>Offline Verified Knowledge</span>
+              <span>Local Ollama Fallback (Offline Model)</span>
             </div>
           )}
         </div>
@@ -54,7 +75,7 @@ export function WebIntelligenceCard({ card }: WebIntelligenceCardProps) {
 
       {/* Main Summary Section */}
       <div className="rounded-lg border border-[#1E293B]/70 bg-[#0B0F17] p-4 text-sm leading-relaxed text-[#E2E8F0]">
-        <p className="font-sans whitespace-pre-wrap">{card.summary}</p>
+        <p className="font-sans whitespace-pre-wrap">{cleanSummary}</p>
       </div>
 
       {/* Key Findings / Bullet Points */}
@@ -63,14 +84,14 @@ export function WebIntelligenceCard({ card }: WebIntelligenceCardProps) {
           <h3 className="font-mono text-xs uppercase tracking-wider text-[#94A3B8]">
             Key Takeaways & Regulatory Facts:
           </h3>
-          <ul className="grid grid-cols-1 gap-2">
+          <ul className="grid grid-cols-1 gap-2 list-none pl-0 m-0">
             {bullets.map((bullet, idx) => (
               <li
                 key={idx}
                 className="flex items-start space-x-2.5 rounded border border-[#1E293B]/50 bg-[#121824] p-3 text-xs text-[#CBD5E1]"
               >
                 <CheckCircle2 className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />
-                <span className="leading-relaxed font-sans">{bullet}</span>
+                <span className="leading-relaxed font-sans inline">{bullet}</span>
               </li>
             ))}
           </ul>

@@ -34,6 +34,13 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
   };
 
   const getProviderLabel = () => {
+    if (trace.provider === 'ollama_fallback') return 'Ollama Fallback (qwen3.5)';
+    if (trace.provider === 'cache') return isResearch ? 'Research Disk Cache' : 'Persistent Cache';
+    if (trace.provider === 'gemini') {
+      if (isResearch) return 'Gemini Search Grounding';
+      if (isTelemetry) return 'OpenF1 + Gemini';
+      return 'DuckDB + Gemini';
+    }
     if (isResearch) return 'Gemini Search Grounding';
     if (isTelemetry) return 'OpenF1 REST API';
     return 'DuckDB Read-Only';
@@ -98,7 +105,17 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
             </div>
             <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
               <span className="text-[10px] text-[#64748B] block">PROVIDER</span>
-              <span className="text-white font-medium">{getProviderLabel()}</span>
+              <span
+                className={`font-medium ${
+                  trace.provider === 'ollama_fallback'
+                    ? 'text-amber-400'
+                    : trace.provider === 'cache'
+                    ? 'text-cyan-400'
+                    : 'text-white'
+                }`}
+              >
+                {getProviderLabel()}
+              </span>
             </div>
           </div>
 

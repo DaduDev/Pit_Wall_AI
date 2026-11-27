@@ -4,6 +4,8 @@ import { PlotlyChart } from './PlotlyChart';
 import { TrackMiniMap } from './TrackMiniMap';
 import { SectorSummaryBar } from './SectorSummaryBar';
 import { WebIntelligenceCard } from './WebIntelligenceCard';
+import { KpiCard } from './KpiCard';
+import { DataTableCard } from './DataTableCard';
 import { MetadataBar } from '../MetadataBar/MetadataBar';
 import { TraceDrawer } from '../EngineeringTrace/TraceDrawer';
 import { ErrorBoundary } from '../ErrorBoundary/ErrorBoundary';
@@ -16,15 +18,30 @@ interface ChartStageProps {
 }
 
 export function ChartStage({ chart, minimap, trace, onResetChart }: ChartStageProps) {
+  const vizType = chart?.viz_type || chart?.chart_type;
+
   const isWebCard =
+    vizType === 'web_intelligence_card' ||
     chart?.chart_type === 'web_intelligence_card' ||
-    chart?.viz_type === 'web_intelligence_card' ||
     !!chart?.web_intelligence_card;
+
+  const isKpiCard =
+    !isWebCard &&
+    (vizType === 'kpi_card' || chart?.chart_type === 'kpi_card' || !!chart?.kpi_card);
+
+  const isDataTable =
+    !isWebCard &&
+    !isKpiCard &&
+    (vizType === 'data_table' || chart?.chart_type === 'data_table' || !!chart?.data_table);
+
+  const isStructuredCard = isWebCard || isKpiCard || isDataTable;
 
   const webCardData =
     chart?.web_intelligence_card ||
     ((chart as any)?.web_card) ||
     (isWebCard ? (chart as any) : null);
+
+  const hasValidPlotlyTraces = Array.isArray(chart?.data) && chart.data.length > 0;
 
   const rawDrivers = Array.isArray(chart?.metadata?.drivers) ? chart.metadata.drivers : [];
   const driverCodes = rawDrivers
@@ -33,7 +50,7 @@ export function ChartStage({ chart, minimap, trace, onResetChart }: ChartStagePr
     .join('-');
 
   const chartKey = chart
-    ? `${chart.chart_type || 'chart'}_${chart.metadata?.year || ''}_${chart.metadata?.grand_prix || ''}_${driverCodes}_${chart.layout?.title?.text || ''}`
+    ? `${vizType || 'chart'}_${chart.metadata?.year || ''}_${chart.metadata?.grand_prix || ''}_${driverCodes}_${chart.layout?.title?.text || chart.title || ''}`
     : 'no_chart';
 
   return (
@@ -51,17 +68,19 @@ export function ChartStage({ chart, minimap, trace, onResetChart }: ChartStagePr
         </div>
       </div>
 
-      {/* Metadata Bar for Active Chart (omitted for web intelligence cards) */}
-      {!isWebCard && (
+      {/* Metadata Bar for Active Chart (omitted for structured HUD cards/tables) */}
+      {!isStructuredCard && (
         <ErrorBoundary fallbackTitle="Telemetry Metadata Render Error" onReset={onResetChart}>
-          {chart && <MetadataBar chart={chart} minimap={minimap || null} />}
+          {chart && hasValidPlotlyTraces && <MetadataBar chart={chart} minimap={minimap || null} />}
         </ErrorBoundary>
       )}
 
       {/* Sector & Speed Trap Summary Bar for Full-Lap Overlays */}
-      {!isWebCard && (
+      {!isStructuredCard && (
         <ErrorBoundary fallbackTitle="Sector Splits Summary Error" onReset={onResetChart}>
-          {chart?.chart_type === 'full_lap_comparison' && <SectorSummaryBar chart={chart} />}
+          {(vizType === 'full_lap' || chart?.chart_type === 'full_lap_comparison') && (
+            <SectorSummaryBar chart={chart} />
+          )}
         </ErrorBoundary>
       )}
 
@@ -71,6 +90,20 @@ export function ChartStage({ chart, minimap, trace, onResetChart }: ChartStagePr
           {chart ? (
             isWebCard ? (
               <WebIntelligenceCard card={webCardData} />
+            ) : isKpiCard ? (
+              <KpiCard title={chart.title} card={chart.kpi_card} />
+            ) : isDataTable ? (
+              <DataTableCard title={chart.title} table={chart.data_table} />
+            ) : !hasValidPlotlyTraces ? (
+              <div className="flex h-full flex-col items-center justify-center rounded-lg border border-[#1E293B] bg-[#0E1420] p-8 text-center text-[#94A3B8]">
+                <Activity className="h-8 w-8 mb-2 text-[#38BDF8]" />
+                <p className="font-mono text-xs text-white">
+                  {chart.title || 'No Plottable Series Returned'}
+                </p>
+                <p className="mt-1 text-[11px] text-[#64748B] max-w-sm">
+                  Numeric trace data was empty for this request. Review the Engineering Trace below for raw query details.
+                </p>
+              </div>
             ) : minimap ? (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 <div className="lg:col-span-2">

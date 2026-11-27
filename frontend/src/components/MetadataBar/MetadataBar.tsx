@@ -10,7 +10,7 @@ export function MetadataBar({ chart, minimap }: MetadataBarProps) {
   if (!chart || (!chart.data && !chart.layout)) return null;
 
   const meta = chart.metadata || {};
-  const isHistorical = meta.domain === 'historical';
+  const isHistorical = meta.domain === 'historical' || meta.domain === 'historical_sql';
 
   // 1. Event & Session
   const year = meta.year;

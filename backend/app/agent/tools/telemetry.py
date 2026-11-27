@@ -25,6 +25,19 @@ from backend.app.charts.telemetry_charts import build_full_lap_comparison_figure
 logger = logging.getLogger(__name__)
 
 
+def _format_lap_time_str(seconds: float) -> str:
+    """Formats lap time in seconds to M:SS.mmm string (e.g. 72.0 -> 1:12.000)."""
+    try:
+        sec = float(seconds)
+        if sec <= 0:
+            return "N/A"
+        mins = int(sec // 60)
+        rem = sec - mins * 60
+        return f"{mins}:{rem:06.3f}" if mins > 0 else f"{rem:.3f}s"
+    except Exception:
+        return str(seconds)
+
+
 def extract_lap_telemetry(lap: Any) -> pd.DataFrame:
     """
     Extracts raw telemetry from a FastF1 lap and normalizes channels.
@@ -379,12 +392,23 @@ def compare_full_lap_telemetry(
     brk_a = round(float(np.mean(interp_a["Brake"] >= 10.0) * 100.0), 1)
     brk_b = round(float(np.mean(interp_b["Brake"] >= 10.0) * 100.0), 1)
 
+    lap_faster = (
+        "TIE"
+        if abs(delta_official) < 0.0005
+        else (code_1 if delta_official > 0 else code_2)
+    )
+    d1_time_str = _format_lap_time_str(time_a_official)
+    d2_time_str = _format_lap_time_str(time_b_official)
+
     metrics = {
         "lap_times": {
             "driver_a": time_a_official,
             "driver_b": time_b_official,
+            "driver_1_lap_time": d1_time_str,
+            "driver_2_lap_time": d2_time_str,
             "delta_s": delta_official,
-            "faster": code_1 if delta_official > 0 else code_2,
+            "faster": lap_faster,
+            "faster_driver": lap_faster,
         },
         "sectors": {
             "sector_1": {

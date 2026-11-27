@@ -116,9 +116,15 @@ def test_e2e_full_lap_montreal(client):
     assert trace_event.get("dataset_id") is not None
 
     chart_event = next(e[1] for e in events if e[0] == "chart")
+    assert chart_event["viz_type"] == "full_lap"
     assert chart_event["chart_type"] in ("full_lap_comparison", "plotly_figure")
 
-    drivers = chart_event.get("metadata", {}).get("drivers", [])
+    meta = chart_event.get("metadata", {})
+    assert meta.get("driver_1_lap_time") == "1:11.742"
+    assert meta.get("driver_2_lap_time") == "1:12.000"
+    assert meta.get("faster_driver") == "RUS"
+
+    drivers = meta.get("drivers", [])
     driver_codes = [d["code"] if isinstance(d, dict) else d for d in drivers]
     assert "RUS" in driver_codes and "VER" in driver_codes
 
@@ -175,8 +181,9 @@ def test_e2e_tyre_stints_pair_and_solo_isolation(client):
 
 def test_e2e_historical_sql_brazil_2021(client):
     """
-    Asserts historical SQL query resolves 2021 Brazilian Grand Prix,
-    hops through HistoricalSQLAgent + PresentationAgent, and returns podium info.
+    Asserts historical SQL 1-row query resolves 2021 Brazilian Grand Prix,
+    returns top-level viz_type == 'kpi_card' with zero raw 'Dataset stored under' / 'Retrieved 1 rows' leaks,
+    and hops through HistoricalSQLAgent + PresentationAgent.
     """
     res = client.post(
         "/api/chat/stream",
@@ -194,8 +201,19 @@ def test_e2e_historical_sql_brazil_2021(client):
     assert "HistoricalSQLAgent" in hop_agents
     assert "PresentationAgent" in hop_agents
 
+    chart_event = next(e[1] for e in events if e[0] == "chart")
+    assert chart_event["viz_type"] == "kpi_card", f"Expected kpi_card for 1-row SQL, got {chart_event.get('viz_type')}"
+    assert chart_event.get("figure") is None, "1-row KPI card must never mount an empty Plotly figure"
+    kpi = chart_event.get("kpi_card") or {}
+    assert len(kpi.get("metrics", [])) >= 2
+    assert "Dataset stored under" not in chart_event.get("title", "")
+    assert "Retrieved 1 rows" not in chart_event.get("title", "")
+
     text_chunks = [e[1].get("delta", "") for e in events if e[0] == "text"]
     full_text = "".join(text_chunks)
+    assert "Dataset stored under" not in full_text
+    assert "Retrieved 1 rows" not in full_text
+    assert "dataset_id=" not in full_text
     assert "Hamilton" in full_text or "HAM" in full_text or "Mercedes" in full_text
 
 
@@ -206,7 +224,7 @@ def test_e2e_historical_sql_brazil_2021(client):
 def test_e2e_web_research_incident(client):
     """
     Asserts research inquiry hops through ResearchAgent + PresentationAgent,
-    and returns a structured web_intelligence_card with source URLs.
+    preserves top-level viz_type == 'web_intelligence_card', and returns clickable source URLs.
     """
     res = client.post(
         "/api/chat/stream",
@@ -225,9 +243,10 @@ def test_e2e_web_research_incident(client):
     assert "PresentationAgent" in hop_agents
 
     chart_event = next(e[1] for e in events if e[0] == "chart")
+    assert chart_event["viz_type"] == "web_intelligence_card"
     assert chart_event["chart_type"] == "web_intelligence_card"
 
-    web_card = chart_event.get("spec", {}).get("web_intelligence_card") or chart_event.get("spec", {})
+    web_card = chart_event.get("web_intelligence_card") or chart_event.get("spec", {}).get("web_intelligence_card") or chart_event.get("spec", {})
     sources = web_card.get("sources", [])
     assert len(sources) >= 1
     for s in sources:

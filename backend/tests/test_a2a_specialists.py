@@ -348,6 +348,9 @@ def test_telemetry_compare_full_lap_montreal(client):
     assert lap_times["driver_a"] == 72.0
     assert lap_times["driver_b"] == 72.0
     assert lap_times["delta_s"] == 0.0
+    assert data["driver_1_lap_time"] == "1:12.000"
+    assert data["driver_2_lap_time"] == "1:12.000"
+    assert data["faster_driver"] == "TIE"
 
     # Verify rendering via PresentationAgent
     r_viz = client.post("/a2a/viz/render", json={
@@ -474,3 +477,98 @@ def test_research_agent_sources_and_offline_fallback(client):
     assert "title" in viz_data["web_intelligence_card"]
     assert "summary" in viz_data["web_intelligence_card"]
     assert "bullets" in viz_data["web_intelligence_card"]
+
+
+# ---------------------------------------------------------------------------
+# Test 11: KPI Card, Data Table Fallback, ThinkingConfig & Faster-Driver Attribution
+# ---------------------------------------------------------------------------
+
+def test_presentation_kpi_card_and_data_table_fallback():
+    """Verify 1-row SQL renders kpi_card and non-numeric multi-row renders data_table (never blank Plotly)."""
+    pa = get_presentation_agent()
+    store = get_artifact_store()
+
+    # 1. Single-row scalar lookup -> kpi_card
+    ds_one = store.put(
+        data=[{
+            "year": 2021,
+            "grand_prix": "São Paulo Grand Prix",
+            "driver_name": "Lewis Hamilton",
+            "constructor": "Mercedes",
+            "grid": 10,
+            "position": 1,
+            "winning_margin_s": 10.496,
+        }],
+        metadata={
+            "domain": "historical_sql",
+            "sql": "SELECT year, grand_prix, driver_name, constructor, grid, position FROM v_race_results LIMIT 1",
+            "columns": ["year", "grand_prix", "driver_name", "constructor", "grid", "position", "winning_margin_s"],
+            "chart_title": "Who won the 2021 Brazilian GP?",
+        },
+    )
+    kpi_spec = pa.render_visualization(
+        dataset_id=ds_one,
+        user_query="Who won the 2021 Brazilian GP?",
+        summary="Retrieved 1 rows across columns ['driver_name'] in 5ms. Dataset stored under dataset_id='abc'.",
+    )
+    assert kpi_spec["viz_type"] == "kpi_card"
+    assert kpi_spec["figure"] is None
+    assert "Dataset stored under" not in kpi_spec["title"]
+    assert "Retrieved 1 rows" not in kpi_spec["summary"]
+    assert kpi_spec["kpi_card"]["subtitle"] == "2021 São Paulo Grand Prix"
+    labels = {m["label"]: m["value"] for m in kpi_spec["kpi_card"]["metrics"]}
+    assert labels["Winner"] == "Lewis Hamilton"
+    assert labels["Constructor"] == "Mercedes"
+    assert labels["Grid"] == "P10"
+    assert labels["Winning Margin"] == "+10.496s"
+
+    # 2. Multi-row non-numeric classification table -> data_table (never empty Plotly canvas)
+    ds_table = store.put(
+        data=[
+            {"position": 1, "driver_name": "Lewis Hamilton", "driver_code": "HAM", "constructor": "Mercedes", "grid": 10, "status": "Finished"},
+            {"position": 2, "driver_name": "Max Verstappen", "driver_code": "VER", "constructor": "Red Bull", "grid": 2, "status": "Finished"},
+        ],
+        metadata={
+            "domain": "historical_sql",
+            "sql": "SELECT position, driver_name, driver_code, constructor, grid, status FROM v_race_results WHERE year = 2021 LIMIT 2",
+            "columns": ["position", "driver_name", "driver_code", "constructor", "grid", "status"],
+            "chart_title": "2021 Brazilian GP Classification",
+        },
+    )
+    tbl_spec = pa.render_visualization(dataset_id=ds_table, user_query="2021 Brazilian GP Classification")
+    assert tbl_spec["viz_type"] == "data_table"
+    assert tbl_spec["figure"] is None
+    assert tbl_spec["data_table"] is not None
+    assert len(tbl_spec["data_table"]["rows"]) == 2
+
+
+def test_full_lap_faster_driver_explicit_attribution():
+    """Verify TelemetryAgent.compare_full_lap explicitly names the faster driver matching the lower lap time."""
+    agent = get_telemetry_agent()
+    res = agent.compare_full_lap(
+        year=2024,
+        grand_prix="Monza",
+        session_type="Qualifying",
+        driver_1="VER",
+        driver_2="NOR",
+    )
+    assert res["success"] is True
+    assert "driver_1_lap_time" in res
+    assert "driver_2_lap_time" in res
+    assert res["faster_driver"] == "NOR"
+    assert "faster_driver=NOR" in res["summary"]
+    assert "Stored in artifact" not in res["summary"]
+
+
+def test_thinking_config_helper_selection():
+    """Verify build_thinking_config disables budget on 2.5 models and minimizes thinking on flash-lite."""
+    from backend.app.config import build_thinking_config
+
+    cfg_25 = build_thinking_config("gemini-2.5-flash")
+    assert cfg_25 is not None
+    assert getattr(cfg_25, "thinking_budget", None) == 0
+
+    cfg_lite = build_thinking_config("gemini-3.5-flash-lite")
+    assert cfg_lite is not None
+    lvl = str(getattr(cfg_lite, "thinking_level", "")).lower()
+    assert "minimal" in lvl or "low" in lvl

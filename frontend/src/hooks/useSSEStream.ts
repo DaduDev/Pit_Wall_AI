@@ -140,34 +140,90 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
                   break;
 
                 case 'chart':
-                  if (data.spec) {
-                    const resolvedMeta = data.metadata || data.spec.metadata || {};
-                    const isWebCard =
-                      data.chart_type === 'web_intelligence_card' ||
-                      data.spec?.viz_type === 'web_intelligence_card' ||
-                      !!data.spec?.web_intelligence_card;
+                  if (
+                    data &&
+                    (data.viz_type ||
+                      data.spec ||
+                      data.figure ||
+                      data.kpi_card ||
+                      data.data_table ||
+                      data.web_intelligence_card)
+                  ) {
+                    const resolvedMeta = data.metadata || data.spec?.metadata || {};
+                    const resolvedVizType =
+                      data.viz_type || data.spec?.viz_type || data.chart_type || 'historical_sql';
+                    const resolvedTitle = data.title || data.spec?.title || data.caption;
 
-                    if (isWebCard) {
+                    if (
+                      resolvedVizType === 'web_intelligence_card' ||
+                      data.chart_type === 'web_intelligence_card' ||
+                      !!data.web_intelligence_card ||
+                      !!data.spec?.web_intelligence_card
+                    ) {
                       setCurrentChart({
                         viz_type: 'web_intelligence_card',
                         chart_type: 'web_intelligence_card',
-                        web_intelligence_card: data.spec.web_intelligence_card || data.spec.web_card || data.spec,
+                        title: resolvedTitle,
+                        web_intelligence_card:
+                          data.web_intelligence_card ||
+                          data.spec?.web_intelligence_card ||
+                          data.spec?.web_card ||
+                          data.spec,
                         metadata: resolvedMeta,
                       });
                       setCurrentMinimap(null);
-                    } else if (data.chart_type === 'track_minimap') {
+                    } else if (
+                      resolvedVizType === 'kpi_card' ||
+                      data.chart_type === 'kpi_card' ||
+                      !!data.kpi_card ||
+                      !!data.spec?.kpi_card
+                    ) {
+                      setCurrentChart({
+                        viz_type: 'kpi_card',
+                        chart_type: 'kpi_card',
+                        title: resolvedTitle,
+                        kpi_card: data.kpi_card || data.spec?.kpi_card,
+                        metadata: resolvedMeta,
+                      });
+                      setCurrentMinimap(null);
+                    } else if (
+                      resolvedVizType === 'data_table' ||
+                      data.chart_type === 'data_table' ||
+                      !!data.data_table ||
+                      !!data.spec?.data_table
+                    ) {
+                      setCurrentChart({
+                        viz_type: 'data_table',
+                        chart_type: 'data_table',
+                        title: resolvedTitle,
+                        data_table: data.data_table || data.spec?.data_table,
+                        metadata: resolvedMeta,
+                      });
+                      setCurrentMinimap(null);
+                    } else if (
+                      resolvedVizType === 'track_minimap' ||
+                      data.chart_type === 'track_minimap'
+                    ) {
+                      const miniFig = data.figure || data.spec || {};
                       setCurrentMinimap({
-                        ...data.spec,
-                        chart_type: data.chart_type,
+                        ...miniFig,
+                        viz_type: 'track_minimap',
+                        chart_type: 'track_minimap',
                         metadata: resolvedMeta,
                       });
                     } else {
+                      const figPayload = data.figure || data.spec || {};
                       setCurrentChart({
-                        ...data.spec,
+                        ...figPayload,
+                        viz_type: resolvedVizType,
                         chart_type: data.chart_type,
+                        title: resolvedTitle,
                         metadata: resolvedMeta,
                       });
-                      if (data.chart_type !== 'corner_comparison') {
+                      if (
+                        resolvedVizType !== 'corner_telemetry' &&
+                        data.chart_type !== 'corner_comparison'
+                      ) {
                         setCurrentMinimap(null);
                       }
                     }
