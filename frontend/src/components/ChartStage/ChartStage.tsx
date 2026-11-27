@@ -3,6 +3,7 @@ import { PlotlySpec, EngineeringTrace } from '../../types';
 import { PlotlyChart } from './PlotlyChart';
 import { TrackMiniMap } from './TrackMiniMap';
 import { SectorSummaryBar } from './SectorSummaryBar';
+import { WebIntelligenceCard } from './WebIntelligenceCard';
 import { MetadataBar } from '../MetadataBar/MetadataBar';
 import { TraceDrawer } from '../EngineeringTrace/TraceDrawer';
 import { ErrorBoundary } from '../ErrorBoundary/ErrorBoundary';
@@ -15,6 +16,16 @@ interface ChartStageProps {
 }
 
 export function ChartStage({ chart, minimap, trace, onResetChart }: ChartStageProps) {
+  const isWebCard =
+    chart?.chart_type === 'web_intelligence_card' ||
+    chart?.viz_type === 'web_intelligence_card' ||
+    !!chart?.web_intelligence_card;
+
+  const webCardData =
+    chart?.web_intelligence_card ||
+    ((chart as any)?.web_card) ||
+    (isWebCard ? (chart as any) : null);
+
   const rawDrivers = Array.isArray(chart?.metadata?.drivers) ? chart.metadata.drivers : [];
   const driverCodes = rawDrivers
     .map((d: any) => (typeof d === 'string' ? d : d?.code || ''))
@@ -40,21 +51,27 @@ export function ChartStage({ chart, minimap, trace, onResetChart }: ChartStagePr
         </div>
       </div>
 
-      {/* Metadata Bar for Active Chart */}
-      <ErrorBoundary fallbackTitle="Telemetry Metadata Render Error" onReset={onResetChart}>
-        {chart && <MetadataBar chart={chart} minimap={minimap || null} />}
-      </ErrorBoundary>
+      {/* Metadata Bar for Active Chart (omitted for web intelligence cards) */}
+      {!isWebCard && (
+        <ErrorBoundary fallbackTitle="Telemetry Metadata Render Error" onReset={onResetChart}>
+          {chart && <MetadataBar chart={chart} minimap={minimap || null} />}
+        </ErrorBoundary>
+      )}
 
       {/* Sector & Speed Trap Summary Bar for Full-Lap Overlays */}
-      <ErrorBoundary fallbackTitle="Sector Splits Summary Error" onReset={onResetChart}>
-        {chart?.chart_type === 'full_lap_comparison' && <SectorSummaryBar chart={chart} />}
-      </ErrorBoundary>
+      {!isWebCard && (
+        <ErrorBoundary fallbackTitle="Sector Splits Summary Error" onReset={onResetChart}>
+          {chart?.chart_type === 'full_lap_comparison' && <SectorSummaryBar chart={chart} />}
+        </ErrorBoundary>
+      )}
 
       {/* Main visualization container */}
-      <ErrorBoundary fallbackTitle="Plotly Telemetry Stage Error" onReset={onResetChart}>
+      <ErrorBoundary fallbackTitle="Telemetry Stage Error" onReset={onResetChart}>
         <div className="flex-1 min-h-[420px]">
           {chart ? (
-            minimap ? (
+            isWebCard ? (
+              <WebIntelligenceCard card={webCardData} />
+            ) : minimap ? (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 <div className="lg:col-span-2">
                   <PlotlyChart key={chartKey} spec={chart} />

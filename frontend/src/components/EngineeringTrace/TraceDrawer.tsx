@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Copy, Check, Terminal, Clock } from 'lucide-react';
+import { ChevronDown, ChevronUp, Copy, Check, Terminal, Clock, ArrowRight, Layers, ExternalLink } from 'lucide-react';
 import { EngineeringTrace } from '../../types';
 
 interface TraceDrawerProps {
@@ -14,10 +14,14 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
     return null;
   }
 
+  const hops = trace.a2a_hops || [];
+  const groundingSources = trace.grounding_sources || [];
+
   const isTelemetry =
     trace.data_domain === 'telemetry' ||
     !!trace.telemetry_params ||
     !!(trace as any).strategy_params;
+  const isResearch = trace.data_domain === 'research' || groundingSources.length > 0;
   const params = trace.telemetry_params || (trace as any).strategy_params;
 
   const handleCopy = () => {
@@ -27,6 +31,12 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
+  };
+
+  const getProviderLabel = () => {
+    if (isResearch) return 'Gemini Search Grounding';
+    if (isTelemetry) return 'OpenF1 REST API';
+    return 'DuckDB Read-Only';
   };
 
   return (
@@ -65,10 +75,12 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
             </div>
             <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
               <span className="text-[10px] text-[#64748B] block">
-                {isTelemetry ? 'SAMPLES / ROWS' : 'ROW COUNT'}
+                {isResearch ? 'SOURCES' : isTelemetry ? 'SAMPLES / ROWS' : 'ROW COUNT'}
               </span>
               <span className="text-white font-medium">
-                {trace.row_count !== undefined
+                {isResearch
+                  ? groundingSources.length
+                  : trace.row_count !== undefined
                   ? trace.row_count
                   : params?.clean_lap_counts
                   ? (Object.values(params.clean_lap_counts) as number[]).reduce(
@@ -86,11 +98,59 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
             </div>
             <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
               <span className="text-[10px] text-[#64748B] block">PROVIDER</span>
-              <span className="text-white font-medium">
-                {isTelemetry ? 'OpenF1 REST API' : 'DuckDB Read-Only'}
-              </span>
+              <span className="text-white font-medium">{getProviderLabel()}</span>
             </div>
           </div>
+
+          {/* A2A Multi-Agent Hop Trace */}
+          {hops.length > 0 && (
+            <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-3 space-y-2">
+              <div className="flex items-center justify-between border-b border-[#1E293B] pb-1.5">
+                <div className="flex items-center space-x-2 text-cyan-400">
+                  <Layers className="h-3.5 w-3.5" />
+                  <span className="font-semibold text-white uppercase tracking-wider text-[11px]">
+                    A2A Specialist Hop Trace ({hops.length} hops)
+                  </span>
+                </div>
+                <span className="text-[10px] text-[#64748B]">Google ADK + A2A Routing</span>
+              </div>
+
+              {/* Hop Sequence Breadcrumbs */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="rounded bg-[#1E293B] px-2 py-1 text-[11px] font-semibold text-white">
+                  PitWallEngineer
+                </span>
+                {hops.map((hop, idx) => (
+                  <div key={idx} className="flex items-center space-x-1.5">
+                    <ArrowRight className="h-3 w-3 text-[#64748B]" />
+                    <div
+                      className={`flex items-center space-x-1.5 rounded border px-2 py-1 text-[11px] ${
+                        hop.status === 'success'
+                          ? 'border-emerald-500/30 bg-[#121824] text-emerald-400'
+                          : 'border-rose-500/30 bg-rose-950/30 text-rose-400'
+                      }`}
+                    >
+                      <span className="font-semibold">{hop.agent_name}</span>
+                      <span className="text-[10px] text-[#64748B]">({hop.duration_ms}ms)</span>
+                      {hop.dataset_id && (
+                        <span className="rounded bg-[#0B0F17] px-1 py-0.2 text-[9px] text-cyan-300 font-mono">
+                          {hop.dataset_id.slice(0, 8)}…
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Dataset ID if present */}
+              {trace.dataset_id && (
+                <div className="flex items-center justify-between pt-1 text-[10px] text-[#64748B] border-t border-[#1E293B]/40">
+                  <span>ARTIFACT DATASET ID:</span>
+                  <span className="font-mono text-cyan-400">{trace.dataset_id}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Telemetry provenance badges */}
           {params && (
@@ -158,6 +218,31 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
                   </span>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Grounding Sources (for Research inquiries) */}
+          {groundingSources.length > 0 && (
+            <div className="space-y-2 pt-1 border-t border-[#1E293B]/60">
+              <div className="flex items-center justify-between text-[#94A3B8]">
+                <span className="text-[10px] uppercase tracking-wider text-[#64748B]">
+                  Google Search Grounding Sources ({groundingSources.length}):
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {groundingSources.map((src, idx) => (
+                  <a
+                    key={idx}
+                    href={src.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between rounded border border-[#1E293B] bg-[#0B0F17] px-2.5 py-1.5 text-[11px] text-[#94A3B8] hover:text-white hover:border-cyan-500/50 transition-colors"
+                  >
+                    <span className="truncate pr-2">{src.title || src.url}</span>
+                    <ExternalLink className="h-3 w-3 shrink-0 text-cyan-400" />
+                  </a>
+                ))}
+              </div>
             </div>
           )}
 

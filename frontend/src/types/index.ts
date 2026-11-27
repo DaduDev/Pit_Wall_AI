@@ -18,11 +18,37 @@ export interface ChatMessage {
   isStreaming?: boolean;
 }
 
+export interface A2AHop {
+  agent_name: string;
+  endpoint: string;
+  duration_ms: number;
+  dataset_id?: string;
+  status: 'success' | 'error';
+  error?: string;
+}
+
+export interface WebSource {
+  title: string;
+  url: string;
+}
+
+export interface WebIntelligenceCardData {
+  title: string;
+  summary: string;
+  bullets?: string[];
+  sources: WebSource[];
+  grounded?: boolean;
+}
+
 export interface EngineeringTrace {
-  data_domain: 'historical' | 'telemetry' | 'mixed';
+  data_domain: 'historical' | 'telemetry' | 'mixed' | 'research';
   query?: string;
   execution_time_ms?: number;
   row_count?: number;
+  dataset_id?: string;
+  a2a_hops?: A2AHop[];
+  grounding_sources?: WebSource[];
+  grounded?: boolean;
   telemetry_params?: {
     year?: number;
     grand_prix?: string;
@@ -123,10 +149,14 @@ export interface ChartMetadata {
 }
 
 export interface PlotlySpec {
-  data: any[];
-  layout: Record<string, any>;
+  data?: any[];
+  layout?: Record<string, any>;
   config?: Record<string, any>;
+  viz_type?: string;
   chart_type?: string;
+  figure?: any;
+  minimap?: any;
+  web_intelligence_card?: WebIntelligenceCardData;
   metadata?: ChartMetadata;
 }
 

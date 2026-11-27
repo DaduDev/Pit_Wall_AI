@@ -9,6 +9,7 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isAssistant = message.role === 'assistant';
+  const isWarningOrError = isAssistant && (message.content.includes('⚠️') || message.content.toLowerCase().includes('pitwall error'));
 
   return (
     <div
@@ -20,8 +21,10 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       <div className="flex items-center space-x-1.5 text-[11px] font-mono text-[#94A3B8]">
         {isAssistant ? (
           <>
-            <Terminal className="h-3 w-3 text-[#E10600]" />
-            <span className="font-semibold text-[#E10600]">PITWALL ENGINEER</span>
+            <Terminal className={`h-3 w-3 ${isWarningOrError ? 'text-amber-400' : 'text-[#E10600]'}`} />
+            <span className={`font-semibold ${isWarningOrError ? 'text-amber-400' : 'text-[#E10600]'}`}>
+              {isWarningOrError ? 'PITWALL WARNING / NOTICE' : 'PITWALL ENGINEER'}
+            </span>
           </>
         ) : (
           <>
@@ -37,7 +40,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       <div
         className={`max-w-[92%] rounded-lg px-4 py-3 text-sm leading-relaxed ${
           isAssistant
-            ? 'border border-[#1E293B] bg-[#121824] text-[#E2E8F0] shadow-sm'
+            ? isWarningOrError
+              ? 'border border-amber-500/40 bg-[#161214] text-[#FDE68A] shadow-md'
+              : 'border border-[#1E293B] bg-[#121824] text-[#E2E8F0] shadow-sm'
             : 'border border-[#38BDF8]/20 bg-[#1E293B] text-white'
         }`}
       >

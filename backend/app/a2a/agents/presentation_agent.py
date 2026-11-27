@@ -25,6 +25,7 @@ class VizSpec(BaseModel):
     viz_type: str = Field(default="plotly_figure", description="Type: 'plotly_figure', 'web_intelligence_card', or 'table'")
     chart_type: str = Field(default="plotly_figure", description="Legacy alias for viz_type")
     figure: Optional[Dict[str, Any]] = Field(default=None, description="Plotly JSON payload conforming to dark HUD standard")
+    minimap: Optional[Dict[str, Any]] = Field(default=None, description="Optional GPS track minimap Plotly payload")
     web_intelligence_card: Optional[Dict[str, Any]] = Field(default=None, description="Structured web research card")
     web_card: Optional[Dict[str, Any]] = Field(default=None, description="Legacy alias for web_intelligence_card")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Standardized telemetry/historical metadata")
@@ -127,6 +128,7 @@ class PresentationAgent:
         # 2. Corner Telemetry Domain
         elif active_domain == "corner_telemetry":
             chart_spec = data.get("chart_spec") if isinstance(data, dict) else None
+            minimap_spec = data.get("minimap_spec") if isinstance(data, dict) else None
             meta = (
                 data.get("metadata")
                 if isinstance(data, dict) and data.get("metadata")
@@ -139,6 +141,7 @@ class PresentationAgent:
                 viz_type="plotly_figure",
                 chart_type="plotly_figure",
                 figure=chart_spec,
+                minimap=minimap_spec,
                 metadata=meta,
                 summary=summary or "Corner telemetry comparison rendered.",
             )

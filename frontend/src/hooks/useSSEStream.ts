@@ -142,7 +142,20 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
                 case 'chart':
                   if (data.spec) {
                     const resolvedMeta = data.metadata || data.spec.metadata || {};
-                    if (data.chart_type === 'track_minimap') {
+                    const isWebCard =
+                      data.chart_type === 'web_intelligence_card' ||
+                      data.spec?.viz_type === 'web_intelligence_card' ||
+                      !!data.spec?.web_intelligence_card;
+
+                    if (isWebCard) {
+                      setCurrentChart({
+                        viz_type: 'web_intelligence_card',
+                        chart_type: 'web_intelligence_card',
+                        web_intelligence_card: data.spec.web_intelligence_card || data.spec.web_card || data.spec,
+                        metadata: resolvedMeta,
+                      });
+                      setCurrentMinimap(null);
+                    } else if (data.chart_type === 'track_minimap') {
                       setCurrentMinimap({
                         ...data.spec,
                         chart_type: data.chart_type,
@@ -166,16 +179,58 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
                   break;
 
                 case 'error':
-                  setCurrentStatus(`Error: ${data.message || data.error}`);
+                  const errorDetail = data.message || data.error || 'Unknown telemetry error';
+                  setCurrentStatus(null);
+                  accumulatedText += (accumulatedText ? '\n\n' : '') + `⚠️ **PitWall Error**: ${errorDetail}`;
+                  setMessages((prev) => {
+                    const existing = prev.find((m) => m.id === assistantMsgId);
+                    if (existing) {
+                      return prev.map((m) =>
+                        m.id === assistantMsgId
+                          ? { ...m, content: accumulatedText, isStreaming: false }
+                          : m
+                      );
+                    } else {
+                      return [
+                        ...prev,
+                        {
+                          id: assistantMsgId,
+                          role: 'assistant',
+                          content: accumulatedText,
+                          timestamp: new Date().toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }),
+                          isStreaming: false,
+                        },
+                      ];
+                    }
+                  });
                   break;
 
                 case 'done':
                   setCurrentStatus(null);
-                  setMessages((prev) =>
-                    prev.map((m) =>
+                  setMessages((prev) => {
+                    const existing = prev.find((m) => m.id === assistantMsgId);
+                    if (!existing && !accumulatedText) {
+                      return [
+                        ...prev,
+                        {
+                          id: assistantMsgId,
+                          role: 'assistant',
+                          content: '⚠️ **PitWall Notice**: Query completed with no telemetry commentary.',
+                          timestamp: new Date().toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }),
+                          isStreaming: false,
+                        },
+                      ];
+                    }
+                    return prev.map((m) =>
                       m.id === assistantMsgId ? { ...m, isStreaming: false } : m
-                    )
-                  );
+                    );
+                  });
                   break;
               }
             } catch (jsonErr) {

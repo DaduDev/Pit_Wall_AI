@@ -1,12 +1,18 @@
 """
-Google ADK & Gemini 3.5 Flash Lite Orchestrator for PitWall AI Race Engineer.
+PitWall AI — Root Race Engineer Orchestrator powered by Google ADK & A2A Multi-Agent Architecture.
 Features:
-- Primary: gemini-3.5-flash-lite with thinking_level="low" (no deprecated parameters).
-- Fallback: Local Ollama via LiteLlm(model="ollama_chat/<OLLAMA_MODEL>") with context trimmed to last 2 turns.
-- Concurrency & Quota Guard: asyncio.Semaphore(3) + brief backoff + in-memory response cache.
-- Coarse-grained tool execution: <=2 LLM calls per query, streaming typed SSE frames.
-- Instant chart & trace dispatch with live token-by-token commentary streaming.
-- Dual Domain: DuckDB Historical SQL Q&A (1950-2024+) & FastF1 Corner Telemetry (2018+).
+- Root PitWallEngineer ADK Agent (LlmAgent with Gemini 3.5 Flash Lite + Ollama qwen3.5:4b fallback)
+- Pure A2A delegation to the 4 verified Pass 1 specialist agents via A2AClient:
+  * HistoricalSQLAgent (/a2a/historical)
+  * TelemetryAgent (/a2a/telemetry)
+  * ResearchAgent (/a2a/research)
+  * PresentationAgent (/a2a/viz)
+- Self-healing corner resolution: queries ResearchAgent & MultiViewer geometry on unknown corners,
+  persists to learned_aliases.json, and retries TelemetryAgent once cleanly.
+- Strict SSE ordering inside try/except/finally:
+  status -> trace (with a2a_hops, dataset_id, SQL/OpenF1 session_key, sources) -> chart/web_card -> text -> done.
+- Zero-hallucination math: all numbers come from DuckDB or OpenF1/FastF1 via A2A specialists.
+- Zero silent errors: era boundaries, unrecognized corners, and specialist errors yield explicit user feedback.
 """
 
 import os
@@ -21,12 +27,12 @@ import re
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import litellm
+
+from google.adk.agents.llm_agent import LlmAgent
+
 from backend.app.config import settings
 from backend.app.agent.prompts.system import RACE_ENGINEER_SYSTEM_PROMPT
-from backend.app.agent.tools.historical_sql import query_historical_f1
-from backend.app.agent.tools.corner_compare import compare_corner_telemetry
-from backend.app.agent.tools.telemetry import compare_full_lap_telemetry
-from backend.app.agent.tools.strategy import analyze_tyre_stints
+from backend.app.a2a.client import A2AClient, get_a2a_client
 from backend.app.chat.session import ConversationSession
 from backend.app.chat.streaming import (
     format_status_event,
@@ -44,87 +50,6 @@ _GEMINI_SEMAPHORE = asyncio.Semaphore(settings.SEMAPHORE_CONCURRENCY)
 
 # In-memory response cache for repeat/preset questions
 _RESPONSE_CACHE: Dict[str, Dict[str, Any]] = {}
-
-# Tool definition for function calling
-HISTORICAL_SQL_TOOL_DEF = {
-    "type": "function",
-    "function": {
-        "name": "query_historical_f1",
-        "description": "Execute a read-only SQL query against DuckDB curated views (v_race_results, v_qualifying, v_pit_stops, v_driver_standings, v_constructor_standings). All numbers must come from this tool.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "sql": {
-                    "type": "string",
-                    "description": "The exact read-only SQL SELECT or WITH query to execute."
-                },
-                "chart_title": {
-                    "type": "string",
-                    "description": "Descriptive title for the resulting chart or table."
-                }
-            },
-            "required": ["sql"]
-        }
-    }
-}
-
-CORNER_COMPARE_TOOL_DEF = {
-    "type": "function",
-    "function": {
-        "name": "compare_corner_telemetry",
-        "description": "Compare two Formula 1 drivers through a specific corner using 1-meter interpolated car telemetry (Speed, Delta, Throttle, Brake, Gear).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "year": {"type": "integer", "description": "Season year (2018 onwards). Default 2024."},
-                "grand_prix": {"type": "string", "description": "Grand Prix or circuit name (e.g. Silverstone, Spa, Monza, Suzuka)."},
-                "corner": {"type": "string", "description": "Corner nickname (e.g. Copse, Eau Rouge, 130R) or Turn number (e.g. Turn 9)."},
-                "driver1": {"type": "string", "description": "First driver code or surname (e.g. VER, Verstappen)."},
-                "driver2": {"type": "string", "description": "Second driver code or surname (e.g. NOR, Norris)."},
-                "session_type": {"type": "string", "description": "Session type: Q (Qualifying), FP1, FP2, FP3, R. Default Q."}
-            },
-            "required": ["corner", "driver1", "driver2"]
-        }
-    }
-}
-
-FULL_LAP_TOOL_DEF = {
-    "type": "function",
-    "function": {
-        "name": "compare_full_lap_telemetry",
-        "description": "Compare two Formula 1 drivers across an entire lap using synchronized 5-meter aligned telemetry (Speed, Cumulative Delta, Throttle & Brake, Gear) and sector splits.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "year": {"type": "integer", "description": "Season year (2023 onwards). Default 2024."},
-                "grand_prix": {"type": "string", "description": "Grand Prix or circuit name (e.g. Monza, Spa, Silverstone, Suzuka)."},
-                "driver1": {"type": "string", "description": "First driver code or surname (e.g. VER, Verstappen)."},
-                "driver2": {"type": "string", "description": "Second driver code or surname (e.g. NOR, Norris)."},
-                "session_type": {"type": "string", "description": "Session type: Q (Qualifying), FP1, FP2, FP3, R. Default Q."}
-            },
-            "required": ["driver1", "driver2"]
-        }
-    }
-}
-
-TYRE_STINT_TOOL_DEF = {
-    "type": "function",
-    "function": {
-        "name": "analyze_tyre_stints",
-        "description": "Analyze tyre stint degradation, clean lap race pace, and pit strategy for Formula 1 drivers (2023 onwards) using OpenF1 data and linear regression pace slopes.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "year": {"type": "integer", "description": "Season year (2023 onwards). Default 2024."},
-                "grand_prix": {"type": "string", "description": "Grand Prix or circuit name (e.g. Monza, Spa, Silverstone, Bahrain)."},
-                "driver1": {"type": "string", "description": "First driver code or surname (e.g. LEC, Leclerc)."},
-                "driver2": {"type": "string", "description": "Second driver code or surname (e.g. PIA, Piastri)."},
-                "session_type": {"type": "string", "description": "Session type: Race (default) or Sprint."}
-            },
-            "required": ["grand_prix"]
-        }
-    }
-}
 
 # Comprehensive Grand Prix and circuit mapping for entity extraction and session routing
 ORCHESTRATOR_CIRCUIT_MAP: Dict[str, Tuple[str, str]] = {
@@ -234,17 +159,111 @@ ORCHESTRATOR_CIRCUIT_MAP: Dict[str, Tuple[str, str]] = {
 }
 
 
-class RaceEngineerOrchestrator:
+class PitWallEngineer:
     """
-    Orchestrates natural language Formula 1 queries, tool execution,
-    and streaming responses with Gemini primary and Ollama fallback.
+    Root Google ADK Agent orchestrating Formula 1 inquiries across 4 A2A specialists:
+    - HistoricalSQLAgent (/a2a/historical)
+    - TelemetryAgent (/a2a/telemetry)
+    - ResearchAgent (/a2a/research)
+    - PresentationAgent (/a2a/viz)
     """
 
-    def __init__(self):
+    def __init__(self, a2a_client: Optional[A2AClient] = None):
+        self.a2a = a2a_client or get_a2a_client()
+        self.adk_agent = self._build_adk_agent()
+
+    def _build_adk_agent(self) -> LlmAgent:
+        return LlmAgent(
+            name="pitwall_engineer",
+            model=settings.GEMINI_MODEL,
+            instruction=RACE_ENGINEER_SYSTEM_PROMPT,
+            tools=[
+                self.delegate_historical,
+                self.delegate_corner_telemetry,
+                self.delegate_full_lap_telemetry,
+                self.delegate_tyre_strategy,
+                self.delegate_research,
+            ],
+        )
+
+    async def delegate_historical(
+        self,
+        question: Optional[str] = None,
+        sql: Optional[str] = None,
+        chart_title: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Delegate historical statistical query to HistoricalSQLAgent."""
+        return await self.a2a.query_historical(question=question, sql=sql, chart_title=chart_title)
+
+    async def delegate_corner_telemetry(
+        self,
+        year: int,
+        grand_prix: str,
+        driver_1: str,
+        driver_2: str,
+        corner: str,
+        session_type: str = "Qualifying",
+    ) -> Dict[str, Any]:
+        """Delegate corner telemetry comparison to TelemetryAgent."""
+        return await self.a2a.compare_corners(
+            year=year,
+            grand_prix=grand_prix,
+            driver_1=driver_1,
+            driver_2=driver_2,
+            corner=corner,
+            session_type=session_type,
+        )
+
+    async def delegate_full_lap_telemetry(
+        self,
+        year: int,
+        grand_prix: str,
+        driver_1: str,
+        driver_2: str,
+        session_type: str = "Qualifying",
+    ) -> Dict[str, Any]:
+        """Delegate full-lap telemetry overlay to TelemetryAgent."""
+        return await self.a2a.compare_lap(
+            year=year,
+            grand_prix=grand_prix,
+            driver_1=driver_1,
+            driver_2=driver_2,
+            session_type=session_type,
+        )
+
+    async def delegate_tyre_strategy(
+        self,
+        year: int,
+        grand_prix: str,
+        drivers: Optional[List[str]] = None,
+        session_type: str = "Race",
+    ) -> Dict[str, Any]:
+        """Delegate tyre degradation & stint strategy to TelemetryAgent."""
+        return await self.a2a.analyze_tyre_stints(
+            year=year,
+            grand_prix=grand_prix,
+            drivers=drivers,
+            session_type=session_type,
+        )
+
+    async def delegate_research(self, query: str) -> Dict[str, Any]:
+        """Delegate technical, incident, or news inquiry to ResearchAgent."""
+        return await self.a2a.query_research(query=query)
+
+
+class RaceEngineerOrchestrator:
+    """
+    Orchestrates natural language Formula 1 queries via the root PitWallEngineer
+    and the 4 A2A specialists, yielding typed Server-Sent Events (SSE).
+    """
+
+    def __init__(self, a2a_client: Optional[A2AClient] = None):
         self.provider = settings.LLM_PROVIDER
         self.gemini_model = settings.GEMINI_MODEL
         self.ollama_model = settings.OLLAMA_MODEL
         self.api_key = settings.GOOGLE_API_KEY
+        self.a2a = a2a_client or get_a2a_client()
+        self.engineer = PitWallEngineer(a2a_client=self.a2a)
 
     def _get_cache_key(self, query: str) -> str:
         return re.sub(r"\s+", " ", query.strip().lower())
@@ -389,7 +408,6 @@ class RaceEngineerOrchestrator:
                 return ORCHESTRATOR_CIRCUIT_MAP[alias]
 
         # 2. Check if the query explicitly mentions a Grand Prix or circuit we couldn't match
-        # If so, do NOT blindly inherit an unrelated circuit from the previous turn!
         has_gp_mention = any(w in q for w in [" gp", "grand prix", "circuit", "autodromo", "autódromo"])
 
         # 3. Inherit from session ONLY if user query has NO circuit or GP reference
@@ -435,7 +453,6 @@ class RaceEngineerOrchestrator:
         if has_corner and not any(kw in q for kw in ["stint", "tyre", "tire", "degradation", "race pace"]):
             return None
 
-        # Extract drivers
         known_drivers = {
             "verstappen": "VER", "ver": "VER", "max": "VER",
             "norris": "NOR", "nor": "NOR", "lando": "NOR",
@@ -506,7 +523,6 @@ class RaceEngineerOrchestrator:
             "overlay",
         ]
         has_full_lap_kw = any(kw in q for kw in full_lap_keywords)
-        # Exclude if it explicitly specifies a corner and does not specify "full lap"
         has_corner = any(
             c in q for c in [
                 "copse", "eau rouge", "130r", "parabolica", "la source", "variante",
@@ -520,7 +536,6 @@ class RaceEngineerOrchestrator:
         if not has_full_lap_kw:
             return None
 
-        # Extract drivers
         known_drivers = {
             "verstappen": "VER", "ver": "VER", "max": "VER",
             "norris": "NOR", "nor": "NOR", "lando": "NOR",
@@ -539,7 +554,6 @@ class RaceEngineerOrchestrator:
                 if code not in matched_drivers:
                     matched_drivers.append(code)
 
-        # Inherit drivers from session if missing in follow-up
         if session and hasattr(session, "last_entities") and session.last_entities:
             last_drivers = session.last_entities.drivers or []
             for d in last_drivers:
@@ -564,9 +578,9 @@ class RaceEngineerOrchestrator:
         else:
             year_found = 2024
 
-        session_type = "Q"
+        session_type = "Qualifying"
         if "race" in q:
-            session_type = "R"
+            session_type = "Race"
         elif "fp1" in q:
             session_type = "FP1"
         elif "fp2" in q:
@@ -594,7 +608,6 @@ class RaceEngineerOrchestrator:
         """
         q = user_query.lower()
 
-        # Extract drivers from current message
         known_drivers = {
             "verstappen": "VER", "ver": "VER", "max": "VER",
             "norris": "NOR", "nor": "NOR", "lando": "NOR",
@@ -613,7 +626,6 @@ class RaceEngineerOrchestrator:
                 if code not in matched_drivers:
                     matched_drivers.append(code)
 
-        # Inherit drivers from session if missing in follow-up
         if session and hasattr(session, "last_entities") and session.last_entities:
             last_drivers = session.last_entities.drivers or []
             for d in last_drivers:
@@ -623,7 +635,6 @@ class RaceEngineerOrchestrator:
         if len(matched_drivers) < 2:
             return None
 
-        # Resolve circuit / Grand Prix
         circuit_found, circuit_key = self._extract_circuit_and_key(
             q,
             default_gp="Silverstone",
@@ -631,7 +642,6 @@ class RaceEngineerOrchestrator:
             session=session,
         )
 
-        # Resolve Year
         m_year = re.search(r"\b(19\d\d|20\d\d)\b", q)
         if m_year:
             year_found = int(m_year.group(1))
@@ -640,7 +650,6 @@ class RaceEngineerOrchestrator:
         else:
             year_found = 2024
 
-        # Resolve Corner
         corner_found = None
         if "copse" in q:
             corner_found = "Copse"
@@ -661,7 +670,6 @@ class RaceEngineerOrchestrator:
             if m_turn:
                 corner_found = f"Turn {m_turn.group(1)}"
 
-        # Marquee corner per circuit if not specified in message
         marquee_corners = {
             "suzuka": "130R",
             "monza": "Turn 1",
@@ -694,14 +702,24 @@ class RaceEngineerOrchestrator:
             "corner": corner_found,
             "grand_prix": circuit_found,
             "year": year_found,
-            "session_type": "Q",
+            "session_type": "Qualifying",
         }
+
+    def _parse_research_intent(self, user_query: str) -> bool:
+        """Determines if query is an inquiry about incidents, stewarding, rules, news, or regulations."""
+        q = user_query.lower()
+        research_keywords = [
+            "incident", "what happened", "crash", "collision", "penalty", "penalties",
+            "steward", "stewarding", "investigation", "regulation", "regulations",
+            "rule change", "budget cap", "technical directive", "engine rules", "engine regulation",
+            "why was", "why did", "protest", "disqualified", "disqualification",
+        ]
+        return any(kw in q for kw in research_keywords)
 
     def _fallback_generate_sql(self, user_query: str) -> Optional[str]:
         """Deterministic SQL generator for standard historical queries to guarantee 100% test reliability."""
         q = user_query.lower()
-        
-        # Monza win percentage regression benchmark
+
         if "monza" in q and any(w in q for w in ["win", "percentage", "rate", "pct", "starts"]):
             return (
                 "SELECT driver_name, "
@@ -731,7 +749,6 @@ class RaceEngineerOrchestrator:
                 "LIMIT 15;"
             )
 
-        # Race winner queries e.g. "who won the 2021 brazil gp" or "who won 2021 brazilian grand prix"
         m_win = re.search(r"who won (?:the )?(\d{4})\s+([a-zA-Z\s]+?)(?:gp|grand prix)?(?:\?|$)", q)
         if m_win:
             year, gp = m_win.group(1), m_win.group(2).strip().lower()
@@ -741,7 +758,6 @@ class RaceEngineerOrchestrator:
                 gp_filter = f"(lower(grand_prix) LIKE '%{gp}%' OR lower(circuit_country) LIKE '%{gp}%')"
             return f"SELECT year, round, grand_prix, driver_name, driver_code, surname, constructor, position, points, finish_time FROM v_race_results WHERE year = {year} AND {gp_filter} AND position = 1;"
 
-        # Race results queries e.g. "brazil 2021 race results" or "2021 brazil results"
         m_res = re.search(r"(?:(\d{4})\s+([a-zA-Z\s]+?)|([a-zA-Z\s]+?)\s+(\d{4}))\s*(?:race\s+results|results|grand prix|gp)?$", q)
         if m_res and ("results" in q or "race" in q):
             year = m_res.group(1) or m_res.group(4)
@@ -771,296 +787,17 @@ class RaceEngineerOrchestrator:
 
         return None
 
-    async def _stream_tyre_stint_commentary(
+    async def _stream_commentary_helper(
         self,
-        user_message: str,
-        stint_result: Dict[str, Any],
+        prompt: str,
+        fallback_text: str,
         session: ConversationSession,
     ) -> AsyncGenerator[str, None]:
-        """Streams race engineer commentary for tyre stint degradation and race strategy."""
-        metrics = stint_result.get("metrics", {})
-        chart_spec = stint_result.get("chart", {}).get("spec", {})
-        meta = chart_spec.get("metadata", {})
-        gp_name = meta.get("event_name", "Grand Prix")
-        year = meta.get("year", 2024)
-        session_type = meta.get("session_type", "Race")
-
-        driver_summaries = []
-        for drv_code, d_info in metrics.items():
-            stints_list = d_info.get("stints", [])
-            stint_descs = []
-            for s in stints_list:
-                slope = s.get("deg_slope_sec_per_lap", 0.0)
-                slope_str = f"{slope:+.3f}s/lap" if slope != 0 else "neutral/flat"
-                stint_descs.append(
-                    f"Stint {s['stint_number']} ({s['compound']}, Laps {s['lap_start']}-{s['lap_end']}, {s['clean_laps']} clean laps): "
-                    f"Avg clean pace {s['avg_clean_pace_s']:.3f}s, Fastest {s['fastest_clean_lap_s']:.3f}s, Observed Deg: {slope_str}"
-                )
-            stops = d_info.get("pit_stops", [])
-            stops_str = f"{len(stops)}-stop (Pit laps: {stops})" if stops else "0-stop"
-            driver_summaries.append(
-                f"- {drv_code} ({d_info.get('team_name', drv_code)}): {stops_str}, {d_info.get('total_clean_laps', 0)} clean laps total ({d_info.get('total_outliers', 0)} outliers filtered).\n  "
-                + "\n  ".join(stint_descs)
-            )
-
-        summary_text = "\n".join(driver_summaries)
-
-        commentary_prompt = (
-            f"User Question: '{user_message}'\n"
-            f"Event: {year} {gp_name} ({session_type})\n"
-            f"Tyre Stint Breakdown:\n{summary_text}\n\n"
-            "Race Engineer Instructions:\n"
-            "- A 2-subplot synchronized dark HUD tyre degradation chart and strategy timeline are plotted on the user's screen. Do NOT recite every lap.\n"
-            "- Provide a concise, high-signal 3 to 4 sentence race engineer debrief in authentic F1 pit-wall radio tone.\n"
-            "- State each driver's pit stop strategy (e.g. 1-stop vs 2-stop) and compound sequence.\n"
-            "- Highlight observed degradation slopes (sec/lap) and clean lap pace across key stints. Note if a negative slope indicates fuel burn advantage overcoming tyre degradation.\n"
-            "- Explain how tyre degradation and stint strategy influenced the battle or track position.\n"
-            "- Strictly cite verified numbers from the telemetry analysis. Never invent or alter numbers.\n"
-            "- NEVER use awkward slang or pit metaphors like 'box this data' or 'box now'."
-        )
-
+        """Streams LLM commentary chunks with graceful fallback to deterministic pit-wall radio speech."""
         if self.provider == "gemini" and self.api_key:
             try:
                 chunk_emitted = False
-                async for chunk in self._stream_gemini_commentary(commentary_prompt):
-                    if chunk:
-                        chunk_emitted = True
-                        yield chunk
-                if chunk_emitted:
-                    return
-            except Exception as e:
-                logger.warning(f"Gemini tyre stint stream failed: {e}. Falling back to deterministic synthesis.")
-
-        # Deterministic fallback radio debrief
-        drivers = list(metrics.keys())
-        if len(drivers) >= 2:
-            d1, d2 = drivers[0], drivers[1]
-            m1, m2 = metrics[d1], metrics[d2]
-            s1_stops = len(m1.get("pit_stops", []))
-            s2_stops = len(m2.get("pit_stops", []))
-            
-            longest_s1 = max(m1.get("stints", []), key=lambda s: s.get("clean_laps", 0), default={})
-            longest_s2 = max(m2.get("stints", []), key=lambda s: s.get("clean_laps", 0), default={})
-
-            s1_deg = longest_s1.get("deg_slope_sec_per_lap", 0.0)
-            s2_deg = longest_s2.get("deg_slope_sec_per_lap", 0.0)
-
-            fallback_text = (
-                f"Copy that. Strategy data from {year} {gp_name} confirms **{d1}** ran a **{s1_stops}-stop** "
-                f"({m1.get('total_clean_laps')} clean laps), holding an observed pace trend of **{s1_deg:+.3f}s/lap** "
-                f"over {longest_s1.get('clean_laps', 0)} laps on the {longest_s1.get('compound', 'HARD')}. "
-                f"In comparison, **{d2}** executed a **{s2_stops}-stop** strategy with a trend of **{s2_deg:+.3f}s/lap** "
-                f"on the {longest_s2.get('compound', 'HARD')} compound ({longest_s2.get('clean_laps', 0)} clean laps). "
-                f"Tyre wear progression and stint timelines are plotted on your stage."
-            )
-        elif len(drivers) == 1:
-            d1 = drivers[0]
-            m1 = metrics[d1]
-            s1_stops = len(m1.get("pit_stops", []))
-            stints_list = m1.get("stints", [])
-            stint_text_parts = []
-            for s in stints_list:
-                slope = s.get("deg_slope_sec_per_lap", 0.0)
-                stint_text_parts.append(
-                    f"Stint {s['stint_number']} ({s['compound']}, {s['clean_laps']} laps): {s['avg_clean_pace_s']:.3f}s avg pace with {slope:+.3f}s/lap observed degradation"
-                )
-            stints_desc = "; ".join(stint_text_parts) if stint_text_parts else "Stint pace and degradation mapped"
-            fallback_text = (
-                f"Copy that. Tyre stint telemetry from {year} {gp_name} confirms **{d1}** ran a **{s1_stops}-stop** race strategy "
-                f"across **{m1.get('total_clean_laps', 0)} clean laps** ({m1.get('total_outliers', 0)} laps excluded as standing start/pit/traffic). "
-                f"{stints_desc}. Clean lap pace progression and stint timelines are plotted on your stage."
-            )
-        else:
-            fallback_text = (
-                f"Copy that. Tyre stint telemetry from {year} {gp_name} retrieved and verified against OpenF1 timing data. "
-                f"Clean lap pace scatter and linear degradation trendlines are plotted on your stage."
-            )
-
-        words = fallback_text.split(" ")
-        for i in range(0, len(words), 3):
-            chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
-            yield chunk
-            await asyncio.sleep(0.01)
-
-    async def _stream_full_lap_commentary(
-        self,
-        user_message: str,
-        result: Dict[str, Any],
-        session: ConversationSession,
-    ) -> AsyncGenerator[str, None]:
-        """Streams race engineer commentary for full-lap telemetry overlay comparison."""
-        metrics = result["metrics"]
-        meta_a = result["metadata"]["driver_a"]
-        meta_b = result["metadata"]["driver_b"]
-        code_a = meta_a["driver_code"]
-        code_b = meta_b["driver_code"]
-
-        lap_a = metrics["lap_times"]["driver_a"]
-        lap_b = metrics["lap_times"]["driver_b"]
-        delta_s = metrics["lap_times"]["delta_s"]
-        faster = code_a if delta_s > 0 else code_b
-        delta_abs = abs(delta_s)
-
-        s1 = metrics["sectors"]["sector_1"]
-        s2 = metrics["sectors"]["sector_2"]
-        s3 = metrics["sectors"]["sector_3"]
-
-        st = metrics["speed_trap"]
-        thr = metrics["full_throttle_pct"]
-        brk = metrics["braking_pct"]
-
-        def _fmt(s: float) -> str:
-            if s <= 0:
-                return "0:00.000"
-            m = int(s // 60)
-            sec = s % 60
-            return f"{m}:{sec:06.3f}"
-
-        commentary_prompt = (
-            f"User Question: '{user_message}'\n"
-            f"Session: {meta_a.get('year')} {meta_a.get('event_name')} ({meta_a.get('session_type')})\n"
-            f"Driver A: {code_a} ({meta_a.get('team')}) — Lap {meta_a.get('lap_number')}: {_fmt(lap_a)}\n"
-            f"Driver B: {code_b} ({meta_b.get('team')}) — Lap {meta_b.get('lap_number')}: {_fmt(lap_b)}\n"
-            f"Overall Lap Delta: {faster} faster by {delta_abs:.3f}s\n"
-            f"Sector Splits:\n"
-            f"- Sector 1: {code_a} {s1['driver_a']}s vs {code_b} {s1['driver_b']}s ({s1['faster']} {abs(s1['delta_s']):.3f}s)\n"
-            f"- Sector 2: {code_a} {s2['driver_a']}s vs {code_b} {s2['driver_b']}s ({s2['faster']} {abs(s2['delta_s']):.3f}s)\n"
-            f"- Sector 3: {code_a} {s3['driver_a']}s vs {code_b} {s3['driver_b']}s ({s3['faster']} {abs(s3['delta_s']):.3f}s)\n"
-            f"Speed Trap & Dynamics:\n"
-            f"- Speed Trap: {code_a} {st['driver_a']} km/h vs {code_b} {st['driver_b']} km/h (Delta: {st['delta_kph']:+.1f} km/h)\n"
-            f"- Full Throttle: {code_a} {thr['driver_a']}% vs {code_b} {thr['driver_b']}%\n"
-            f"- Under Braking: {code_a} {brk['driver_a']}% vs {code_b} {brk['driver_b']}%\n\n"
-            "Race Engineer Instructions:\n"
-            "- A 4-panel telemetry chart with Sector 1/2 markers is plotted on screen. Do not recite every single number.\n"
-            "- Deliver a concise, high-signal 3 to 4 sentence race engineer debrief in authentic F1 pit-wall radio tone.\n"
-            "- State who set the faster lap of the pair and the exact finish delta (e.g. 'edged out Driver B by X.XXXs').\n"
-            "- CRITICAL RULE: NEVER claim a driver 'secured pole position', 'won the session', 'won qualifying', or 'took P1' from this 2-driver comparison unless the tool output explicitly confirms P1 overall across the full field. Say 'edged out [Driver B]' or 'set the faster lap of the pair' instead.\n"
-            "- Highlight key sector differences (where time was gained or lost) and mention top speed / throttle commitment.\n"
-            "- Never hallucinate or alter any numbers. NEVER use awkward slang or pit metaphors like 'box this data', 'box this lap', or 'box now'."
-        )
-
-        if self.provider == "gemini" and self.api_key:
-            try:
-                chunk_emitted = False
-                async for chunk in self._stream_gemini_commentary(commentary_prompt):
-                    if chunk:
-                        chunk_emitted = True
-                        yield chunk
-                if chunk_emitted:
-                    return
-            except Exception as e:
-                logger.warning(f"Gemini full-lap stream failed: {e}. Falling back to deterministic radio debrief.")
-
-        s1_adv = f"{s1['faster']} had the upper hand in Sector 1 (-{abs(s1['delta_s']):.3f}s)"
-        s2_adv = f"Sector 2 went to {s2['faster']} (-{abs(s2['delta_s']):.3f}s)"
-        s3_adv = f"{s3['faster']} sealed it in Sector 3 (-{abs(s3['delta_s']):.3f}s)"
-
-        fallback_text = (
-            f"Copy that. Full-lap telemetry confirms **{faster}** set the faster lap of the pair by **{delta_abs:.3f}s** "
-            f"({code_a} **{_fmt(lap_a)}** vs {code_b} **{_fmt(lap_b)}**). "
-            f"{s1_adv}, while {s2_adv} and {s3_adv}. "
-            f"Speed trap readings show **{code_a}** at **{st['driver_a']} km/h** against **{code_b}** at **{st['driver_b']} km/h**, "
-            f"with **{code_a}** spending **{thr['driver_a']}%** of the lap at full throttle versus **{thr['driver_b']}%** for **{code_b}**. "
-            "Synchronized multi-panel traces with sector boundaries are plotted on your stage."
-        )
-
-        words = fallback_text.split(" ")
-        for i in range(0, len(words), 3):
-            chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
-            yield chunk
-            await asyncio.sleep(0.01)
-
-    async def _stream_corner_commentary(
-        self,
-        user_message: str,
-        result: Dict[str, Any],
-        session: ConversationSession,
-    ) -> AsyncGenerator[str, None]:
-        """Streams race engineer commentary for corner telemetry comparison."""
-        metrics = result["metrics"]
-        meta_a = result["metadata"]["driver_a"]
-        meta_b = result["metadata"]["driver_b"]
-        corner = result["metadata"]["corner"]
-        code_a = meta_a["driver_code"]
-        code_b = meta_b["driver_code"]
-        delta_s = metrics["corner_time_delta_s"]
-        faster = code_a if delta_s > 0 else code_b
-        time_diff = abs(delta_s)
-
-        speed_a = metrics["apex_min_speed_kph"]["driver_a"]
-        speed_b = metrics["apex_min_speed_kph"]["driver_b"]
-        gear_a = metrics["lowest_gear"]["driver_a"]
-        gear_b = metrics["lowest_gear"]["driver_b"]
-        bp_delta = metrics["braking_point_delta_m"]
-        th_delta = metrics["full_throttle_pickup_m"]
-
-        commentary_prompt = (
-            f"User Question: '{user_message}'\n"
-            f"Corner: {corner.get('nickname', 'Corner')} (Turn {corner.get('turn_number')}) at {meta_a.get('event_name', '')} {meta_a.get('year', '')}\n"
-            f"Driver A: {code_a} ({meta_a.get('team', '')})\n"
-            f"Driver B: {code_b} ({meta_b.get('team', '')})\n"
-            f"Computed Metrics:\n"
-            f"- Corner Delta: {faster} faster by {time_diff:.3f}s\n"
-            f"- Apex Minimum Speeds: {code_a} {speed_a} km/h (Gear {gear_a}) vs {code_b} {speed_b} km/h (Gear {gear_b})\n"
-            f"- Braking Point Delta: {bp_delta}m\n"
-            f"- Full-Throttle Exit Pickup Delta: {th_delta}m\n\n"
-            "Race Engineer Instructions:\n"
-            "- A 5-panel telemetry chart and GPS mini-map are plotted on screen. Do not list raw data rows.\n"
-            "- Deliver a concise, high-signal 2 to 4 sentence race engineer debrief in authentic F1 radio tone.\n"
-            "- State who was faster through the corner and the exact delta.\n"
-            "- Cite apex minimum speeds and braking or throttle differences.\n"
-            "- Never hallucinate or alter any numbers. NEVER use awkward slang or pit metaphors like 'box this data' or 'box now'."
-        )
-
-        if self.provider == "gemini" and self.api_key:
-            try:
-                chunk_emitted = False
-                async for chunk in self._stream_gemini_commentary(commentary_prompt):
-                    if chunk:
-                        chunk_emitted = True
-                        yield chunk
-                if chunk_emitted:
-                    return
-            except Exception as e:
-                logger.warning(f"Gemini commentary stream failed: {e}. Falling back...")
-
-        fallback_text = (
-            f"Copy that. Telemetry through **{corner.get('nickname', 'the corner')}** (Turn {corner.get('turn_number', '')}) "
-            f"confirms **{faster}** was faster by **{time_diff:.3f}s** through the corner window. "
-            f"**{code_a}** carried **{speed_a} km/h** at the apex in Gear {gear_a}, while **{code_b}** reached **{speed_b} km/h** in Gear {gear_b}. "
-            "Synchronized 5-panel telemetry and the GPS track mini-map are plotted on your stage."
-        )
-
-        words = fallback_text.split(" ")
-        for i in range(0, len(words), 3):
-            chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
-            yield chunk
-            await asyncio.sleep(0.01)
-
-    async def _stream_commentary(
-        self,
-        user_message: str,
-        tool_result: Dict[str, Any],
-        session: ConversationSession,
-    ) -> AsyncGenerator[str, None]:
-        """Streams race engineer commentary for historical SQL queries."""
-        rows_summary = json.dumps(tool_result["data"][:12], ensure_ascii=False)
-        commentary_prompt = (
-            f"User Question: '{user_message}'\n"
-            f"Ground Truth Query: {tool_result['sql']}\n"
-            f"Query Results ({tool_result['row_count']} rows total):\n{rows_summary}\n\n"
-            "Race Engineer Instructions:\n"
-            "- A chart or table is already plotted on the user's screen. Do NOT list or recite every row or bar.\n"
-            "- Provide a concise, high-signal 2 to 4 sentence race engineer summary in authentic F1 pit-wall radio tone.\n"
-            "- Direct answer first, followed by key peaks/totals and notable trends or outliers.\n"
-            "- Strictly quote exact numbers and names from the results. Never invent or alter any number.\n"
-            "- Do not use awkward slang like 'box this data'."
-        )
-
-        if self.provider == "gemini" and self.api_key:
-            try:
-                chunk_emitted = False
-                async for chunk in self._stream_gemini_commentary(commentary_prompt):
+                async for chunk in self._stream_gemini_commentary(prompt):
                     if chunk:
                         chunk_emitted = True
                         yield chunk
@@ -1070,62 +807,27 @@ class RaceEngineerOrchestrator:
                 logger.warning(f"Gemini commentary stream failed: {e}. Checking Ollama fallback...")
                 try:
                     chunk_emitted = False
-                    async for chunk in self._stream_ollama_commentary(commentary_prompt, session):
+                    async for chunk in self._stream_ollama_commentary(prompt, session):
                         if chunk:
                             chunk_emitted = True
                             yield chunk
                     if chunk_emitted:
                         return
-                except Exception as ollama_err:
-                    logger.warning(f"Ollama fallback stream failed: {ollama_err}")
-
+                except Exception as oe:
+                    logger.warning(f"Ollama commentary stream failed: {oe}")
         elif self.provider == "ollama":
             try:
                 chunk_emitted = False
-                async for chunk in self._stream_ollama_commentary(commentary_prompt, session):
+                async for chunk in self._stream_ollama_commentary(prompt, session):
                     if chunk:
                         chunk_emitted = True
                         yield chunk
                 if chunk_emitted:
                     return
             except Exception as e:
-                logger.warning(f"Ollama commentary stream failed: {e}. Falling back to deterministic synthesis.")
+                logger.warning(f"Ollama commentary stream failed: {e}")
 
-        if tool_result["row_count"] > 0:
-            first = tool_result["data"][0]
-            if "surname" in first and "position" in first:
-                driver_label = first.get("driver_name") or f"{first.get('forename', '')} {first['surname']}".strip()
-                code_str = f" ({first['driver_code']})" if first.get("driver_code") else ""
-                fallback_text = (
-                    f"Confirmed on timing data: **{driver_label}**{code_str} took P{first['position']} "
-                    f"driving for **{first.get('constructor', 'the team')}** at the {first.get('year', '')} {first.get('grand_prix', '')}, "
-                    f"securing {first.get('points', 0)} points. Visual telemetry and classification are plotted on your stage."
-                )
-            elif "win_percentage" in first:
-                driver_label = first.get("driver_name") or f"{first.get('forename', '')} {first.get('surname', '')}".strip()
-                starts = first.get("total_starts", 0)
-                wins = first.get("wins", 0)
-                pct = first.get("win_percentage", 0)
-                fallback_text = (
-                    f"Confirmed on race records: **{driver_label}** leads the classification with a **{pct}%** win rate "
-                    f"({wins} wins across {starts} distinct starts). The complete leaderboard breakdown is plotted on your telemetry display."
-                )
-            elif "podiums" in first:
-                first_year = tool_result["data"][0].get("year", "")
-                last_year = tool_result["data"][-1].get("year", "")
-                total_podiums = sum(r.get("podiums", 0) for r in tool_result["data"])
-                fallback_text = (
-                    f"Confirmed on timing records: A total of **{total_podiums} podium finishes** recorded for **Lewis Hamilton** "
-                    f"from {first_year} to {last_year}. The season-by-season progression is displayed on your telemetry stage."
-                )
-            else:
-                fallback_text = (
-                    f"Confirmed on timing data: **{tool_result['row_count']} verified records** retrieved. "
-                    "Visual chart and classification breakdown are plotted on your telemetry stage."
-                )
-        else:
-            fallback_text = "No records matched the criteria in the historical database."
-
+        # Deterministic pit-wall radio fallback
         words = fallback_text.split(" ")
         for i in range(0, len(words), 3):
             chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
@@ -1138,294 +840,412 @@ class RaceEngineerOrchestrator:
         session: ConversationSession,
     ) -> AsyncGenerator[str, None]:
         """
-        Executes query with the Race Engineer and yields SSE events in real-time.
-        Immediately dispatches trace and chart events, then streams commentary tokens live.
-        Handles both DuckDB Historical SQL and FastF1 Corner Telemetry comparisons.
+        Executes user query via the 4 Pass 1 A2A Specialists and yields typed SSE frames.
+        Guarantees strict SSE ordering:
+        status -> trace -> chart/web_card -> text -> done.
         """
         start_time = time.perf_counter()
+        self.a2a.clear_hops()
 
-        # ==========================================
-        # ROUTE 0: Tyre Stint Degradation & Strategy (US4)
-        # ==========================================
-        stint_intent = self._parse_tyre_stint_intent(user_message, session=session)
-        if stint_intent:
-            drivers_key = ",".join(sorted(stint_intent["drivers"]))
-            stint_cache_key = (
-                f"tyre_stints:{stint_intent['year']}:"
-                f"{stint_intent['grand_prix'].lower()}:"
-                f"{stint_intent['session_type'].lower()}:{drivers_key}"
-            )
+        try:
+            # ==========================================
+            # ROUTE 0: Web Research & Incident Inquiries
+            # ==========================================
+            if self._parse_research_intent(user_message):
+                yield format_status_event("consulting_research", "Consulting Research Agent with Google Search Grounding...")
+                res_research = await self.a2a.query_research(query=user_message)
 
-            # Check normalized strategy cache key
-            if stint_cache_key in _RESPONSE_CACHE:
-                cached = _RESPONSE_CACHE[stint_cache_key]
-                yield format_status_event("cached_response", "Retrieving verified race trace from cache...")
-                if cached.get("trace"):
-                    yield format_trace_event(**cached["trace"])
-                if cached.get("chart"):
-                    yield format_chart_event(
-                        cached["chart"]["chart_type"],
-                        cached["chart"]["spec"],
-                        cached["chart"].get("caption", ""),
-                        metadata=cached["chart"].get("metadata"),
-                    )
-                yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
-                words = cached["text"].split(" ")
-                for i in range(0, len(words), 3):
-                    chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
-                    yield format_text_event(chunk)
-                    await asyncio.sleep(0.01)
-                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-                yield format_done_event(total_duration_ms)
-                return
-
-            if stint_intent["year"] < 2023:
-                era_msg = (
-                    f"Car sensor telemetry and tyre stint data is digitally available for 2023–present via the OpenF1 REST API. "
-                    f"For the {stint_intent['year']} {stint_intent['grand_prix']}, sensor-level tyre degradation is not available, "
-                    f"but official pit stops and race classifications are available in Historical Analytics."
-                )
-                yield format_status_event("era_boundary", era_msg)
-
-                gp_clean = stint_intent['grand_prix'].lower()
-                sql = (
-                    f"SELECT p.year, p.grand_prix, p.stop, p.lap, p.duration_seconds, "
-                    f"p.driver_name, p.driver_code, p.constructor "
-                    f"FROM v_pit_stops p "
-                    f"WHERE p.year = {stint_intent['year']} "
-                    f"AND (lower(p.grand_prix) LIKE '%{gp_clean}%' OR lower(p.circuit_country) LIKE '%{gp_clean}%') "
-                    f"ORDER BY p.lap ASC, p.duration_seconds ASC LIMIT 15;"
-                )
-                tool_result = await asyncio.to_thread(query_historical_f1, sql, chart_title=f"{stint_intent['year']} {stint_intent['grand_prix']} Pit Stops")
-
-                trace_payload = {
-                    "data_domain": "historical",
-                    "query": tool_result["sql"],
-                    "execution_time_ms": tool_result["execution_time_ms"],
-                    "row_count": tool_result["row_count"],
-                    "confidence": 1.0,
-                    "notes": f"Tyre stint sensor data unavailable for pre-2023 ({stint_intent['year']}). Retrieved official pit stops from DuckDB.",
-                }
-                yield format_trace_event(**trace_payload)
-
-                if tool_result.get("chart"):
-                    yield format_chart_event(
-                        chart_type=tool_result["chart"]["chart_type"],
-                        spec=tool_result["chart"]["spec"],
-                        caption=tool_result["chart"].get("caption", f"{stint_intent['year']} {stint_intent['grand_prix']} Pit Stops"),
+                if res_research.get("success") and res_research.get("dataset_id"):
+                    dataset_id = res_research["dataset_id"]
+                    viz_res = await self.a2a.render_viz(
+                        dataset_id=dataset_id,
+                        user_query=user_message,
+                        domain="research",
+                        summary=res_research.get("summary", ""),
                     )
 
-                yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
+                    # 1. Trace Event
+                    hops = self.a2a.get_hops()
+                    trace_payload = {
+                        "data_domain": "research",
+                        "confidence": 1.0,
+                        "dataset_id": dataset_id,
+                        "a2a_hops": hops,
+                        "grounding_sources": res_research.get("sources", []),
+                        "grounded": res_research.get("grounded", False),
+                        "notes": "Verified via ResearchAgent with Google Search Grounding.",
+                    }
+                    yield format_trace_event(**trace_payload)
 
-                explanation_prefix = (
-                    f"⚠️ **Telemetry Era Boundary Notice**: Free high-frequency tyre stint sensor data is digitally available for **2023–present** via OpenF1. "
-                    f"For the **{stint_intent['year']} {stint_intent['grand_prix']}**, sensor-level tyre degradation is not available, "
-                    f"but official pit stops from our historical database are plotted on your stage:\n\n"
+                    # 2. Chart Event (Web Intelligence Card)
+                    yield format_chart_event(
+                        chart_type="web_intelligence_card",
+                        spec=viz_res,
+                        caption=user_message,
+                        metadata=viz_res.get("metadata"),
+                    )
+
+                    yield format_status_event("analyzing_results", "Research card generated — Engineer delivering debrief...")
+
+                    # 3. Stream Text Commentary
+                    summary_text = res_research.get("summary", "")
+                    prompt = (
+                        f"User Question: '{user_message}'\n"
+                        f"Grounded Research Findings:\n{summary_text}\n\n"
+                        "Instructions:\n"
+                        "- Deliver a concise, authoritative 2 to 3 sentence pit-wall debrief on the incident/topic.\n"
+                        "- State verified facts from the findings. Never invent details."
+                    )
+                    engineer_text = ""
+                    async for chunk in self._stream_commentary_helper(prompt, summary_text, session):
+                        yield format_text_event(chunk)
+                        engineer_text += chunk
+
+                    session.add_user_message(user_message)
+                    session.add_assistant_message(engineer_text)
+                    session.update_entities(tool="research")
+                    return
+                else:
+                    err_msg = res_research.get("error") or "Research inquiry could not be completed."
+                    yield format_error_event("RESEARCH_ERROR", err_msg)
+                    yield format_text_event(f"Copy that. We were unable to retrieve verified sources for this inquiry: {err_msg}")
+                    return
+
+            # ==========================================
+            # ROUTE 1: Tyre Stint Degradation & Strategy
+            # ==========================================
+            stint_intent = self._parse_tyre_stint_intent(user_message, session=session)
+            if stint_intent:
+                drivers_key = ",".join(sorted(stint_intent["drivers"]))
+                stint_cache_key = (
+                    f"tyre_stints:{stint_intent['year']}:"
+                    f"{stint_intent['grand_prix'].lower()}:"
+                    f"{stint_intent['session_type'].lower()}:{drivers_key}"
                 )
-                yield format_text_event(explanation_prefix)
 
-                engineer_text = explanation_prefix
-                async for delta in self._stream_commentary(user_message, tool_result, session):
-                    yield format_text_event(delta)
-                    engineer_text += delta
+                if stint_cache_key in _RESPONSE_CACHE:
+                    cached = _RESPONSE_CACHE[stint_cache_key]
+                    yield format_status_event("cached_response", "Retrieving verified race trace from cache...")
+                    if cached.get("trace"):
+                        yield format_trace_event(**cached["trace"])
+                    if cached.get("chart"):
+                        yield format_chart_event(
+                            cached["chart"]["chart_type"],
+                            cached["chart"]["spec"],
+                            cached["chart"].get("caption", ""),
+                            metadata=cached["chart"].get("metadata"),
+                        )
+                    yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
+                    words = cached["text"].split(" ")
+                    for i in range(0, len(words), 3):
+                        chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
+                        yield format_text_event(chunk)
+                        await asyncio.sleep(0.01)
+                    return
 
-                session.add_user_message(user_message)
-                session.add_assistant_message(engineer_text)
-                session.update_entities(
-                    year=stint_intent["year"],
-                    grand_prix=stint_intent["grand_prix"],
-                    drivers=[d for d in [stint_intent["driver1"], stint_intent["driver2"]] if d],
-                    tool="historical_sql",
+                # Pre-2023 Era Boundary Enforcement
+                if stint_intent["year"] < 2023:
+                    era_msg = (
+                        f"Car sensor telemetry and tyre stint data is digitally available for 2023–present via the OpenF1 REST API. "
+                        f"For the {stint_intent['year']} {stint_intent['grand_prix']}, sensor-level tyre degradation is not available, "
+                        f"but official pit stops and race classifications are available in Historical Analytics."
+                    )
+                    yield format_status_event("era_boundary", era_msg)
+
+                    gp_clean = stint_intent['grand_prix'].lower()
+                    sql = (
+                        f"SELECT p.year, p.grand_prix, p.stop, p.lap, p.duration_seconds, "
+                        f"p.driver_name, p.driver_code, p.constructor "
+                        f"FROM v_pit_stops p "
+                        f"WHERE p.year = {stint_intent['year']} "
+                        f"AND (lower(p.grand_prix) LIKE '%{gp_clean}%' OR lower(p.circuit_country) LIKE '%{gp_clean}%') "
+                        f"ORDER BY p.lap ASC, p.duration_seconds ASC LIMIT 15;"
+                    )
+                    hist_res = await self.a2a.query_historical(sql=sql, chart_title=f"{stint_intent['year']} {stint_intent['grand_prix']} Pit Stops")
+
+                    if hist_res.get("success") and hist_res.get("dataset_id"):
+                        viz_res = await self.a2a.render_viz(
+                            dataset_id=hist_res["dataset_id"],
+                            user_query=user_message,
+                            domain="historical_sql",
+                            summary=f"{stint_intent['year']} {stint_intent['grand_prix']} Pit Stops",
+                        )
+                        hops = self.a2a.get_hops()
+                        yield format_trace_event(
+                            data_domain="historical",
+                            query=hist_res["trace"].get("sql", sql),
+                            execution_time_ms=hist_res.get("execution_time_ms"),
+                            row_count=hist_res.get("row_count"),
+                            dataset_id=hist_res["dataset_id"],
+                            a2a_hops=hops,
+                            notes=f"Tyre stint sensor data unavailable for pre-2023 ({stint_intent['year']}). Retrieved official pit stops from DuckDB.",
+                        )
+                        if viz_res.get("figure"):
+                            yield format_chart_event(
+                                chart_type="plotly_figure",
+                                spec=viz_res["figure"],
+                                caption=f"{stint_intent['year']} {stint_intent['grand_prix']} Pit Stops",
+                                metadata=viz_res.get("metadata"),
+                            )
+
+                        explanation = (
+                            f"⚠️ **Telemetry Era Boundary Notice**: Free high-frequency tyre stint sensor data is digitally available for **2023–present** via OpenF1. "
+                            f"For the **{stint_intent['year']} {stint_intent['grand_prix']}**, sensor-level tyre degradation is not available, "
+                            f"but official pit stops from our historical database are plotted on your stage:\n\n"
+                        )
+                        yield format_text_event(explanation)
+                        fb_text = hist_res.get("summary", "Official pit stop timings retrieved.")
+                        yield format_text_event(fb_text)
+
+                        session.add_user_message(user_message)
+                        session.add_assistant_message(explanation + fb_text)
+                        session.update_entities(
+                            year=stint_intent["year"],
+                            grand_prix=stint_intent["grand_prix"],
+                            drivers=[d for d in [stint_intent["driver1"], stint_intent["driver2"]] if d],
+                            tool="historical_sql",
+                        )
+                    return
+
+                yield format_status_event(
+                    "loading_strategy",
+                    f"Delegating tyre stint analysis for {stint_intent['grand_prix']} {stint_intent['year']} to TelemetryAgent...",
                 )
-                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-                yield format_done_event(total_duration_ms)
-                return
 
-            yield format_status_event(
-                "loading_strategy",
-                f"Loading tyre stint and race pace data for {stint_intent['grand_prix']} {stint_intent['year']}...",
-            )
-
-            try:
-                stint_result = await asyncio.to_thread(
-                    analyze_tyre_stints,
+                stint_res = await self.a2a.analyze_tyre_stints(
                     year=stint_intent["year"],
                     grand_prix=stint_intent["grand_prix"],
                     drivers=stint_intent["drivers"],
-                    driver1=stint_intent["driver1"],
-                    driver2=stint_intent["driver2"],
                     session_type=stint_intent["session_type"],
                 )
 
-                # Emit trace
-                yield format_trace_event(**stint_result["trace"])
+                if not stint_res.get("success"):
+                    err_msg = stint_res.get("error") or "Tyre stint analysis failed."
+                    yield format_error_event("STRATEGY_ERROR", err_msg)
+                    yield format_text_event(f"Tyre strategy error: {err_msg}")
+                    return
 
-                # Emit chart
+                dataset_id = stint_res["dataset_id"]
+                viz_res = await self.a2a.render_viz(
+                    dataset_id=dataset_id,
+                    user_query=user_message,
+                    domain="tyre_degradation",
+                    summary=stint_res.get("summary", ""),
+                )
+
+                hops = self.a2a.get_hops()
+                trace_payload = {
+                    "data_domain": "telemetry",
+                    "confidence": 1.0,
+                    "dataset_id": dataset_id,
+                    "a2a_hops": hops,
+                    "strategy_params": stint_res.get("trace", {}).get("strategy_params"),
+                    "notes": "Verified against OpenF1 clean lap timing arrays via TelemetryAgent.",
+                }
+                yield format_trace_event(**trace_payload)
+
+                chart_spec = viz_res.get("figure") or stint_res.get("chart", {}).get("spec")
+                chart_meta = viz_res.get("metadata") or stint_res.get("chart", {}).get("metadata")
+                stint_caption = stint_res.get("summary", "Tyre Stint Degradation")
                 yield format_chart_event(
-                    chart_type=stint_result["chart"]["chart_type"],
-                    spec=stint_result["chart"]["spec"],
-                    caption=stint_result["chart"]["caption"],
-                    metadata=stint_result["chart"].get("metadata"),
+                    chart_type="tyre_degradation",
+                    spec=chart_spec,
+                    caption=stint_caption,
+                    metadata=chart_meta,
                 )
 
                 yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
 
-                # Stream commentary
                 engineer_text = ""
-                async for delta in self._stream_tyre_stint_commentary(user_message, stint_result, session):
-                    yield format_text_event(delta)
-                    engineer_text += delta
+                fb_text = stint_res.get("summary", "Tyre degradation analysis complete.")
+                prompt = (
+                    f"User Question: '{user_message}'\n"
+                    f"Event: {stint_intent['year']} {stint_intent['grand_prix']} ({stint_intent['session_type']})\n"
+                    f"Verified Telemetry Summary:\n{stint_res.get('summary')}\n\n"
+                    "Instructions:\n"
+                    "- 2-subplot tyre degradation scatter and strategy timeline are plotted on the user's screen.\n"
+                    "- Provide a concise, high-signal 3 sentence race engineer debrief in authentic F1 pit-wall radio tone.\n"
+                    "- State each driver's pit stop count, stint compounds, and observed degradation slope (sec/lap).\n"
+                    "- Never invent numbers. Strictly quote verified figures from summary."
+                )
+                async for chunk in self._stream_commentary_helper(prompt, fb_text, session):
+                    yield format_text_event(chunk)
+                    engineer_text += chunk
 
                 session.add_user_message(user_message)
                 session.add_assistant_message(engineer_text)
                 session.update_entities(
                     year=stint_intent["year"],
                     grand_prix=stint_intent["grand_prix"],
-                    drivers=list(stint_result["metrics"].keys()),
+                    drivers=stint_intent["drivers"],
                     tool="strategy",
                 )
 
                 _RESPONSE_CACHE[stint_cache_key] = {
                     "text": engineer_text,
-                    "chart": stint_result["chart"],
-                    "trace": stint_result["trace"],
+                    "chart": {"chart_type": "tyre_degradation", "spec": chart_spec, "caption": stint_caption, "metadata": chart_meta},
+                    "trace": trace_payload,
                 }
-
-                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-                yield format_done_event(total_duration_ms)
                 return
 
-            except Exception as e:
-                logger.error(f"Tyre stint analysis encountered error: {e}", exc_info=True)
-                yield format_error_event(
-                    code="STRATEGY_ERROR",
-                    message=f"Tyre strategy error: {str(e)}",
-                    retryable=False,
+            # ==========================================
+            # ROUTE 2: Full-Lap Telemetry Overlay
+            # ==========================================
+            full_lap_intent = self._parse_full_lap_intent(user_message, session=session)
+            if full_lap_intent:
+                drivers_key = ",".join(sorted([full_lap_intent["driver1"], full_lap_intent["driver2"]]))
+                full_lap_cache_key = (
+                    f"full_lap:{full_lap_intent['year']}:"
+                    f"{full_lap_intent['grand_prix'].lower()}:"
+                    f"{full_lap_intent.get('session_type', 'qualifying').lower()}:{drivers_key}"
                 )
-                yield format_done_event(int((time.perf_counter() - start_time) * 1000))
-                return
 
-        # ==========================================
-        # ROUTE 1: Full-Lap Telemetry Overlay (US3)
-        # ==========================================
-        full_lap_intent = self._parse_full_lap_intent(user_message, session=session)
-        if full_lap_intent:
-            drivers_key = ",".join(sorted([full_lap_intent["driver1"], full_lap_intent["driver2"]]))
-            full_lap_cache_key = (
-                f"full_lap:{full_lap_intent['year']}:"
-                f"{full_lap_intent['grand_prix'].lower()}:"
-                f"{full_lap_intent.get('session_type', 'q').lower()}:{drivers_key}"
-            )
+                if full_lap_cache_key in _RESPONSE_CACHE:
+                    cached = _RESPONSE_CACHE[full_lap_cache_key]
+                    yield format_status_event("cached_response", "Retrieving verified race trace from cache...")
+                    if cached.get("trace"):
+                        yield format_trace_event(**cached["trace"])
+                    if cached.get("chart"):
+                        yield format_chart_event(
+                            cached["chart"]["chart_type"],
+                            cached["chart"]["spec"],
+                            cached["chart"].get("caption", ""),
+                            metadata=cached["chart"].get("metadata"),
+                        )
+                    yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
+                    words = cached["text"].split(" ")
+                    for i in range(0, len(words), 3):
+                        chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
+                        yield format_text_event(chunk)
+                        await asyncio.sleep(0.01)
+                    return
 
-            # Check normalized full-lap cache key
-            if full_lap_cache_key in _RESPONSE_CACHE:
-                cached = _RESPONSE_CACHE[full_lap_cache_key]
-                yield format_status_event("cached_response", "Retrieving verified race trace from cache...")
-                if cached.get("trace"):
-                    yield format_trace_event(**cached["trace"])
-                if cached.get("chart"):
-                    yield format_chart_event(
-                        cached["chart"]["chart_type"],
-                        cached["chart"]["spec"],
-                        cached["chart"].get("caption", ""),
-                        metadata=cached["chart"].get("metadata"),
+                # Pre-2023 Era Boundary Enforcement
+                if full_lap_intent["year"] < 2023:
+                    era_msg = (
+                        f"Car sensor telemetry (ECU speed, throttle, brake, gear) is digitally available for 2023–present via the OpenF1 REST API. "
+                        f"For the {full_lap_intent['year']} {full_lap_intent['grand_prix']}, high-frequency sensor telemetry is not available, "
+                        f"but official race classifications, lap times, and sector data are available in Historical Analytics."
                     )
-                yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
-                words = cached["text"].split(" ")
-                for i in range(0, len(words), 3):
-                    chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
-                    yield format_text_event(chunk)
-                    await asyncio.sleep(0.01)
-                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-                yield format_done_event(total_duration_ms)
-                return
+                    yield format_status_event("era_boundary", era_msg)
 
-            if full_lap_intent["year"] < 2023:
-                era_msg = (
-                    f"Car sensor telemetry (ECU speed, throttle, brake, gear) is digitally available for 2023–present via the OpenF1 REST API. "
-                    f"For the {full_lap_intent['year']} {full_lap_intent['grand_prix']}, high-frequency sensor telemetry is not available, "
-                    f"but official race classifications, lap times, and sector data are available in Historical Analytics."
+                    gp_clean = full_lap_intent['grand_prix'].lower()
+                    sql = (
+                        f"SELECT year, round, grand_prix, position, driver_name, driver_code, constructor, points, finish_time, grid, status "
+                        f"FROM v_race_results "
+                        f"WHERE year = {full_lap_intent['year']} "
+                        f"AND (lower(grand_prix) LIKE '%{gp_clean}%' OR lower(circuit_country) LIKE '%{gp_clean}%') "
+                        f"ORDER BY position ASC LIMIT 15;"
+                    )
+                    hist_res = await self.a2a.query_historical(sql=sql, chart_title=f"{full_lap_intent['year']} {full_lap_intent['grand_prix']} Results")
+
+                    if hist_res.get("success") and hist_res.get("dataset_id"):
+                        viz_res = await self.a2a.render_viz(
+                            dataset_id=hist_res["dataset_id"],
+                            user_query=user_message,
+                            domain="historical_sql",
+                            summary=f"{full_lap_intent['year']} {full_lap_intent['grand_prix']} Results",
+                        )
+                        hops = self.a2a.get_hops()
+                        yield format_trace_event(
+                            data_domain="historical",
+                            query=hist_res["trace"].get("sql", sql),
+                            execution_time_ms=hist_res.get("execution_time_ms"),
+                            row_count=hist_res.get("row_count"),
+                            dataset_id=hist_res["dataset_id"],
+                            a2a_hops=hops,
+                            notes=f"Full-lap telemetry unavailable for pre-2023 ({full_lap_intent['year']}). Retrieved official race results from DuckDB.",
+                        )
+                        if viz_res.get("figure"):
+                            yield format_chart_event(
+                                chart_type="plotly_figure",
+                                spec=viz_res["figure"],
+                                caption=f"{full_lap_intent['year']} {full_lap_intent['grand_prix']} Results",
+                                metadata=viz_res.get("metadata"),
+                            )
+
+                        explanation = (
+                            f"⚠️ **Telemetry Era Boundary Notice**: Free high-frequency car sensor telemetry is digitally available for **2023–present** via OpenF1. "
+                            f"For the **{full_lap_intent['year']} {full_lap_intent['grand_prix']}**, car sensor telemetry is not available, but official race classifications and timings from our historical database are plotted on your stage:\n\n"
+                        )
+                        yield format_text_event(explanation)
+                        fb_text = hist_res.get("summary", "Official race classifications retrieved.")
+                        yield format_text_event(fb_text)
+
+                        session.add_user_message(user_message)
+                        session.add_assistant_message(explanation + fb_text)
+                        session.update_entities(
+                            year=full_lap_intent["year"],
+                            grand_prix=full_lap_intent["grand_prix"],
+                            drivers=[full_lap_intent["driver1"], full_lap_intent["driver2"]],
+                            tool="historical_sql",
+                        )
+                    return
+
+                yield format_status_event(
+                    "loading_telemetry",
+                    f"Delegating full-lap telemetry for {full_lap_intent['driver1']} vs {full_lap_intent['driver2']} to TelemetryAgent...",
                 )
-                yield format_status_event("era_boundary", era_msg)
 
-                gp_clean = full_lap_intent['grand_prix'].lower()
-                sql = (
-                    f"SELECT year, round, grand_prix, position, driver_name, driver_code, constructor, points, finish_time, grid, status "
-                    f"FROM v_race_results "
-                    f"WHERE year = {full_lap_intent['year']} "
-                    f"AND (lower(grand_prix) LIKE '%{gp_clean}%' OR lower(circuit_country) LIKE '%{gp_clean}%') "
-                    f"ORDER BY position ASC LIMIT 15;"
+                lap_res = await self.a2a.compare_lap(
+                    year=full_lap_intent["year"],
+                    grand_prix=full_lap_intent["grand_prix"],
+                    driver_1=full_lap_intent["driver1"],
+                    driver_2=full_lap_intent["driver2"],
+                    session_type=full_lap_intent["session_type"],
                 )
-                tool_result = await asyncio.to_thread(query_historical_f1, sql, chart_title=f"{full_lap_intent['year']} {full_lap_intent['grand_prix']} Results")
 
+                if not lap_res.get("success"):
+                    err_msg = lap_res.get("error") or "Full lap comparison failed."
+                    yield format_error_event("TELEMETRY_ERROR", err_msg)
+                    yield format_text_event(f"Full-lap telemetry error: {err_msg}")
+                    return
+
+                dataset_id = lap_res["dataset_id"]
+                viz_res = await self.a2a.render_viz(
+                    dataset_id=dataset_id,
+                    user_query=user_message,
+                    domain="full_lap_telemetry",
+                    summary=lap_res.get("summary", ""),
+                )
+
+                hops = self.a2a.get_hops()
                 trace_payload = {
-                    "data_domain": "historical",
-                    "query": tool_result["sql"],
-                    "execution_time_ms": tool_result["execution_time_ms"],
-                    "row_count": tool_result["row_count"],
+                    "data_domain": "telemetry",
                     "confidence": 1.0,
-                    "notes": f"Full-lap telemetry unavailable for pre-2023 ({full_lap_intent['year']}). Retrieved official race results from DuckDB.",
+                    "dataset_id": dataset_id,
+                    "a2a_hops": hops,
+                    "telemetry_params": lap_res.get("trace", {}).get("telemetry_params"),
+                    "notes": "Synchronized 5-meter aligned full-lap telemetry via TelemetryAgent.",
                 }
                 yield format_trace_event(**trace_payload)
 
-                if tool_result.get("chart"):
-                    yield format_chart_event(
-                        chart_type=tool_result["chart"]["chart_type"],
-                        spec=tool_result["chart"]["spec"],
-                        caption=tool_result["chart"].get("caption", f"{full_lap_intent['year']} {full_lap_intent['grand_prix']} Results"),
-                    )
-
-                yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
-
-                explanation_prefix = (
-                    f"⚠️ **Telemetry Era Boundary Notice**: Free high-frequency car sensor telemetry is digitally available for **2023–present** via OpenF1. "
-                    f"For the **{full_lap_intent['year']} {full_lap_intent['grand_prix']}**, car sensor telemetry is not available, but official race classifications and timings from our historical database are plotted on your stage:\n\n"
-                )
-                yield format_text_event(explanation_prefix)
-
-                engineer_text = explanation_prefix
-                async for delta in self._stream_commentary(user_message, tool_result, session):
-                    yield format_text_event(delta)
-                    engineer_text += delta
-
-                session.add_user_message(user_message)
-                session.add_assistant_message(engineer_text)
-                session.update_entities(
-                    year=full_lap_intent["year"],
-                    grand_prix=full_lap_intent["grand_prix"],
-                    drivers=[full_lap_intent["driver1"], full_lap_intent["driver2"]],
-                    tool="historical_sql",
-                )
-                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-                yield format_done_event(total_duration_ms)
-                return
-
-            yield format_status_event(
-                "loading_telemetry",
-                f"Loading full-lap telemetry for {full_lap_intent['driver1']} vs {full_lap_intent['driver2']} at {full_lap_intent['year']} {full_lap_intent['grand_prix']}...",
-            )
-
-            try:
-                lap_result = await asyncio.to_thread(compare_full_lap_telemetry, **full_lap_intent)
-
-                # Emit trace
-                yield format_trace_event(**lap_result["trace"])
-
-                # Emit full-lap multi-panel chart
+                chart_spec = viz_res.get("figure") or lap_res.get("chart", {}).get("spec")
+                chart_meta = viz_res.get("metadata") or lap_res.get("chart", {}).get("metadata")
+                lap_caption = lap_res.get("summary", "Full-Lap Telemetry Overlay")
                 yield format_chart_event(
-                    chart_type=lap_result["chart"]["chart_type"],
-                    spec=lap_result["chart"]["spec"],
-                    caption=lap_result["chart"]["caption"],
-                    metadata=lap_result["chart"].get("metadata"),
+                    chart_type="full_lap_comparison",
+                    spec=chart_spec,
+                    caption=lap_caption,
+                    metadata=chart_meta,
                 )
 
                 yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
 
-                # Stream commentary
                 engineer_text = ""
-                async for delta in self._stream_full_lap_commentary(user_message, lap_result, session):
-                    yield format_text_event(delta)
-                    engineer_text += delta
+                fb_text = lap_res.get("summary", "Full-lap telemetry comparison complete.")
+                prompt = (
+                    f"User Question: '{user_message}'\n"
+                    f"Full-Lap Telemetry Metrics Summary:\n{lap_res.get('summary')}\n\n"
+                    "Instructions:\n"
+                    "- Synchronized 4-panel telemetry chart with sector markers is plotted on screen.\n"
+                    "- Deliver a concise, high-signal 3 sentence race engineer debrief in authentic F1 pit-wall radio tone.\n"
+                    "- State who set the faster lap of the pair and the finish delta. Never claim someone won qualifying/pole from this 2-driver comparison.\n"
+                    "- Highlight sector split differences and speed trap delta."
+                )
+                async for chunk in self._stream_commentary_helper(prompt, fb_text, session):
+                    yield format_text_event(chunk)
+                    engineer_text += chunk
 
                 session.add_user_message(user_message)
                 session.add_assistant_message(engineer_text)
@@ -1438,164 +1258,218 @@ class RaceEngineerOrchestrator:
 
                 _RESPONSE_CACHE[full_lap_cache_key] = {
                     "text": engineer_text,
-                    "chart": lap_result["chart"],
-                    "trace": lap_result["trace"],
+                    "chart": {"chart_type": "full_lap_comparison", "spec": chart_spec, "caption": lap_caption, "metadata": chart_meta},
+                    "trace": trace_payload,
                 }
-
-                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-                yield format_done_event(total_duration_ms)
                 return
 
-            except Exception as e:
-                logger.error(f"Full-lap telemetry comparison encountered error: {e}", exc_info=True)
-                yield format_error_event(
-                    code="TELEMETRY_ERROR",
-                    message=f"Full-lap telemetry error: {str(e)}",
-                    retryable=False,
+            # ==========================================
+            # ROUTE 3: Corner Telemetry Comparison
+            # ==========================================
+            corner_intent = self._parse_corner_comparison_intent(user_message, session=session)
+            if corner_intent:
+                drivers_key = ",".join(sorted([corner_intent["driver1"], corner_intent["driver2"]]))
+                corner_cache_key = (
+                    f"corner:{corner_intent['year']}:"
+                    f"{corner_intent['grand_prix'].lower()}:"
+                    f"{corner_intent['corner'].lower()}:{drivers_key}"
                 )
-                yield format_done_event(int((time.perf_counter() - start_time) * 1000))
-                return
 
-        # ==========================================
-        # ROUTE 2: Corner Telemetry Comparison (US2)
-        # ==========================================
-        corner_intent = self._parse_corner_comparison_intent(user_message, session=session)
-        if corner_intent:
-            drivers_key = ",".join(sorted([corner_intent["driver1"], corner_intent["driver2"]]))
-            corner_cache_key = (
-                f"corner:{corner_intent['year']}:"
-                f"{corner_intent['grand_prix'].lower()}:"
-                f"{corner_intent['corner'].lower()}:{drivers_key}"
-            )
+                if corner_cache_key in _RESPONSE_CACHE:
+                    cached = _RESPONSE_CACHE[corner_cache_key]
+                    yield format_status_event("cached_response", "Retrieving verified race trace from cache...")
+                    if cached.get("trace"):
+                        yield format_trace_event(**cached["trace"])
+                    if cached.get("chart"):
+                        yield format_chart_event(
+                            cached["chart"]["chart_type"],
+                            cached["chart"]["spec"],
+                            cached["chart"].get("caption", ""),
+                            metadata=cached["chart"].get("metadata"),
+                        )
+                    if cached.get("minimap"):
+                        yield format_chart_event(
+                            cached["minimap"]["chart_type"],
+                            cached["minimap"]["spec"],
+                            cached["minimap"].get("caption", ""),
+                            metadata=cached["minimap"].get("metadata"),
+                        )
+                    yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
+                    words = cached["text"].split(" ")
+                    for i in range(0, len(words), 3):
+                        chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
+                        yield format_text_event(chunk)
+                        await asyncio.sleep(0.01)
+                    return
 
-            # Check normalized corner cache key
-            if corner_cache_key in _RESPONSE_CACHE:
-                cached = _RESPONSE_CACHE[corner_cache_key]
-                yield format_status_event("cached_response", "Retrieving verified race trace from cache...")
-                if cached.get("trace"):
-                    yield format_trace_event(**cached["trace"])
-                if cached.get("chart"):
-                    yield format_chart_event(
-                        cached["chart"]["chart_type"],
-                        cached["chart"]["spec"],
-                        cached["chart"].get("caption", ""),
-                        metadata=cached["chart"].get("metadata"),
+                # Pre-2023 Era Boundary Enforcement
+                if corner_intent["year"] < 2023:
+                    era_msg = (
+                        f"Car sensor telemetry (ECU speed, throttle, brake, gear) is digitally available for 2023–present via the OpenF1 REST API. "
+                        f"For the {corner_intent['year']} {corner_intent['grand_prix']}, high-frequency sensor telemetry is not available, "
+                        f"but official race classifications, lap times, and sector data are available in Historical Analytics."
                     )
-                if cached.get("minimap"):
-                    yield format_chart_event(
-                        cached["minimap"]["chart_type"],
-                        cached["minimap"]["spec"],
-                        cached["minimap"].get("caption", ""),
-                        metadata=cached["minimap"].get("metadata"),
+                    yield format_status_event("era_boundary", era_msg)
+
+                    gp_clean = corner_intent['grand_prix'].lower()
+                    sql = (
+                        f"SELECT year, round, grand_prix, position, driver_name, driver_code, constructor, points, finish_time, grid, status "
+                        f"FROM v_race_results "
+                        f"WHERE year = {corner_intent['year']} "
+                        f"AND (lower(grand_prix) LIKE '%{gp_clean}%' OR lower(circuit_country) LIKE '%{gp_clean}%' OR lower(grand_prix) LIKE '%são paulo%' OR lower(grand_prix) LIKE '%brazil%') "
+                        f"ORDER BY position ASC LIMIT 15;"
                     )
-                yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
-                words = cached["text"].split(" ")
-                for i in range(0, len(words), 3):
-                    chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
-                    yield format_text_event(chunk)
-                    await asyncio.sleep(0.01)
-                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-                yield format_done_event(total_duration_ms)
-                return
+                    hist_res = await self.a2a.query_historical(sql=sql, chart_title=f"{corner_intent['year']} {corner_intent['grand_prix']} Results")
 
-            if corner_intent["year"] < 2023:
-                # Era boundary: Car sensor telemetry is 2023+ only.
-                # Provide clear era boundary explanation and route to DuckDB Historical Analytics
-                era_msg = (
-                    f"Car sensor telemetry (ECU speed, throttle, brake, gear) is digitally available for 2023–present via the OpenF1 REST API. "
-                    f"For the {corner_intent['year']} {corner_intent['grand_prix']}, high-frequency sensor telemetry is not available, "
-                    f"but official race classifications, lap times, and sector data are available in Historical Analytics."
+                    if hist_res.get("success") and hist_res.get("dataset_id"):
+                        viz_res = await self.a2a.render_viz(
+                            dataset_id=hist_res["dataset_id"],
+                            user_query=user_message,
+                            domain="historical_sql",
+                            summary=f"{corner_intent['year']} {corner_intent['grand_prix']} Results",
+                        )
+                        hops = self.a2a.get_hops()
+                        yield format_trace_event(
+                            data_domain="historical",
+                            query=hist_res["trace"].get("sql", sql),
+                            execution_time_ms=hist_res.get("execution_time_ms"),
+                            row_count=hist_res.get("row_count"),
+                            dataset_id=hist_res["dataset_id"],
+                            a2a_hops=hops,
+                            notes=f"Telemetry unavailable for pre-2023 ({corner_intent['year']}). Retrieved official race results from DuckDB.",
+                        )
+                        if viz_res.get("figure"):
+                            yield format_chart_event(
+                                chart_type="plotly_figure",
+                                spec=viz_res["figure"],
+                                caption=f"{corner_intent['year']} {corner_intent['grand_prix']} Results",
+                                metadata=viz_res.get("metadata"),
+                            )
+
+                        explanation = (
+                            f"⚠️ **Telemetry Era Boundary Notice**: Free high-frequency car sensor telemetry (ECU speed, throttle, brake, gear) "
+                            f"is digitally available for **2023–present** via OpenF1. For the **{corner_intent['year']} {corner_intent['grand_prix']}**, "
+                            f"car sensor telemetry is not available, but official race classifications and timings from our historical database are plotted on your stage:\n\n"
+                        )
+                        yield format_text_event(explanation)
+                        fb_text = hist_res.get("summary", "Official race results retrieved.")
+                        yield format_text_event(fb_text)
+
+                        session.add_user_message(user_message)
+                        session.add_assistant_message(explanation + fb_text)
+                        session.update_entities(
+                            year=corner_intent["year"],
+                            grand_prix=corner_intent["grand_prix"],
+                            drivers=[corner_intent["driver1"], corner_intent["driver2"]],
+                            tool="historical_sql",
+                        )
+                    return
+
+                yield format_status_event(
+                    "loading_telemetry",
+                    f"Delegating corner telemetry for {corner_intent['driver1']} vs {corner_intent['driver2']} through {corner_intent['corner']} to TelemetryAgent...",
                 )
-                yield format_status_event("era_boundary", era_msg)
 
-                gp_clean = corner_intent['grand_prix'].lower()
-                sql = (
-                    f"SELECT year, round, grand_prix, position, driver_name, driver_code, constructor, points, finish_time, grid, status "
-                    f"FROM v_race_results "
-                    f"WHERE year = {corner_intent['year']} "
-                    f"AND (lower(grand_prix) LIKE '%{gp_clean}%' OR lower(circuit_country) LIKE '%{gp_clean}%' OR lower(grand_prix) LIKE '%são paulo%' OR lower(grand_prix) LIKE '%brazil%') "
-                    f"ORDER BY position ASC LIMIT 15;"
+                corner_res = await self.a2a.compare_corners(
+                    year=corner_intent["year"],
+                    grand_prix=corner_intent["grand_prix"],
+                    driver_1=corner_intent["driver1"],
+                    driver_2=corner_intent["driver2"],
+                    corner=corner_intent["corner"],
+                    session_type=corner_intent["session_type"],
                 )
-                tool_result = await asyncio.to_thread(query_historical_f1, sql, chart_title=f"{corner_intent['year']} {corner_intent['grand_prix']} Results")
 
+                # Self-healing unknown corner loop with ResearchAgent
+                if corner_res.get("unknown_corner") or (not corner_res.get("success") and "unknown" in str(corner_res.get("error", "")).lower()):
+                    yield format_status_event(
+                        "healing_corner",
+                        f"Unrecognized corner '{corner_intent['corner']}'. Delegating to ResearchAgent to cross-reference MultiViewer geometry...",
+                    )
+                    heal_res = await self.a2a.resolve_and_learn_corner(
+                        circuit=corner_intent["grand_prix"],
+                        corner_query=corner_intent["corner"],
+                    )
+
+                    if heal_res.get("success") and heal_res.get("turn_number"):
+                        resolved_turn = str(heal_res["turn_number"])
+                        yield format_status_event(
+                            "corner_learned",
+                            f"Verified '{corner_intent['corner']}' as Turn {resolved_turn}. Retrying corner telemetry...",
+                        )
+                        corner_res = await self.a2a.compare_corners(
+                            year=corner_intent["year"],
+                            grand_prix=corner_intent["grand_prix"],
+                            driver_1=corner_intent["driver1"],
+                            driver_2=corner_intent["driver2"],
+                            corner=resolved_turn,
+                            session_type=corner_intent["session_type"],
+                        )
+
+                if not corner_res.get("success"):
+                    err_msg = corner_res.get("error") or corner_res.get("message") or f"Telemetry error: unrecognized corner '{corner_intent['corner']}'"
+                    hint = corner_res.get("hint", "")
+                    full_err = f"{err_msg} {hint}".strip()
+                    yield format_error_event("UNKNOWN_CORNER" if corner_res.get("unknown_corner") else "TELEMETRY_ERROR", full_err)
+                    yield format_text_event(f"Copy that. We encountered an issue loading telemetry: {full_err}")
+                    return
+
+                dataset_id = corner_res["dataset_id"]
+                viz_res = await self.a2a.render_viz(
+                    dataset_id=dataset_id,
+                    user_query=user_message,
+                    domain="corner_telemetry",
+                    summary=corner_res.get("summary", ""),
+                )
+
+                hops = self.a2a.get_hops()
                 trace_payload = {
-                    "data_domain": "historical",
-                    "query": tool_result["sql"],
-                    "execution_time_ms": tool_result["execution_time_ms"],
-                    "row_count": tool_result["row_count"],
+                    "data_domain": "telemetry",
                     "confidence": 1.0,
-                    "notes": f"Telemetry unavailable for pre-2023 ({corner_intent['year']}). Retrieved official race results from DuckDB.",
+                    "dataset_id": dataset_id,
+                    "a2a_hops": hops,
+                    "telemetry_params": corner_res.get("trace", {}).get("telemetry_params"),
+                    "interpolated_points": corner_res.get("trace", {}).get("interpolated_points"),
+                    "notes": "1-meter spatial interpolation around corner reference apex via TelemetryAgent.",
                 }
                 yield format_trace_event(**trace_payload)
 
-                if tool_result.get("chart"):
-                    yield format_chart_event(
-                        chart_type=tool_result["chart"]["chart_type"],
-                        spec=tool_result["chart"]["spec"],
-                        caption=tool_result["chart"].get("caption", f"{corner_intent['year']} {corner_intent['grand_prix']} Results"),
-                    )
-
-                yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
-
-                explanation_prefix = (
-                    f"⚠️ **Telemetry Era Boundary Notice**: Free high-frequency car sensor telemetry (ECU speed, throttle, brake, gear) "
-                    f"is digitally available for **2023–present** via OpenF1. For the **{corner_intent['year']} {corner_intent['grand_prix']}**, "
-                    f"car sensor telemetry is not available, but official race classifications and timings from our historical database are plotted on your stage:\n\n"
-                )
-                yield format_text_event(explanation_prefix)
-
-                engineer_text = explanation_prefix
-                async for delta in self._stream_commentary(user_message, tool_result, session):
-                    yield format_text_event(delta)
-                    engineer_text += delta
-
-                session.add_user_message(user_message)
-                session.add_assistant_message(engineer_text)
-                session.update_entities(
-                    year=corner_intent["year"],
-                    grand_prix=corner_intent["grand_prix"],
-                    drivers=[corner_intent["driver1"], corner_intent["driver2"]],
-                    tool="historical_sql",
-                )
-                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-                yield format_done_event(total_duration_ms)
-                return
-
-            yield format_status_event(
-                "loading_telemetry",
-                f"Loading high-frequency telemetry for {corner_intent['driver1']} vs {corner_intent['driver2']} through {corner_intent['corner']}...",
-            )
-
-            try:
-                corner_result = await asyncio.to_thread(compare_corner_telemetry, **corner_intent)
-
-                # Emit trace
-                yield format_trace_event(**corner_result["trace"])
-
-                # Emit multi-panel chart
+                chart_spec = viz_res.get("figure") or corner_res.get("chart", {}).get("spec")
+                chart_meta = viz_res.get("metadata") or corner_res.get("chart", {}).get("metadata")
+                corner_caption = corner_res.get("summary", f"{corner_intent['corner']} Telemetry")
                 yield format_chart_event(
-                    chart_type=corner_result["chart"]["chart_type"],
-                    spec=corner_result["chart"]["spec"],
-                    caption=corner_result["chart"]["caption"],
-                    metadata=corner_result["chart"].get("metadata"),
+                    chart_type="corner_comparison",
+                    spec=chart_spec,
+                    caption=corner_caption,
+                    metadata=chart_meta,
                 )
 
-                # Emit mini-map
-                if corner_result.get("minimap"):
+                # Emit mini-map if available
+                minimap_spec = viz_res.get("minimap") or corner_res.get("minimap", {}).get("spec")
+                minimap_caption = f"{corner_intent['grand_prix']} Track Layout"
+                if minimap_spec:
                     yield format_chart_event(
-                        chart_type=corner_result["minimap"]["chart_type"],
-                        spec=corner_result["minimap"]["spec"],
-                        caption=corner_result["minimap"]["caption"],
-                        metadata=corner_result["minimap"].get("metadata"),
+                        chart_type="track_minimap",
+                        spec=minimap_spec,
+                        caption=minimap_caption,
+                        metadata=chart_meta,
                     )
 
                 yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
 
-                # Stream commentary
                 engineer_text = ""
-                async for delta in self._stream_corner_commentary(user_message, corner_result, session):
-                    yield format_text_event(delta)
-                    engineer_text += delta
+                fb_text = corner_res.get("summary", "Corner comparison completed.")
+                prompt = (
+                    f"User Question: '{user_message}'\n"
+                    f"Corner Telemetry Summary:\n{corner_res.get('summary')}\n\n"
+                    "Instructions:\n"
+                    "- 5-panel telemetry chart and GPS mini-map are plotted on screen.\n"
+                    "- Deliver a concise, high-signal 2 to 3 sentence race engineer debrief in authentic F1 radio tone.\n"
+                    "- State who carried more apex minimum speed and who held the braking/delta advantage.\n"
+                    "- Never invent or alter numbers."
+                )
+                async for chunk in self._stream_commentary_helper(prompt, fb_text, session):
+                    yield format_text_event(chunk)
+                    engineer_text += chunk
 
                 session.add_user_message(user_message)
                 session.add_assistant_message(engineer_text)
@@ -1609,153 +1483,134 @@ class RaceEngineerOrchestrator:
 
                 _RESPONSE_CACHE[corner_cache_key] = {
                     "text": engineer_text,
-                    "chart": corner_result["chart"],
-                    "minimap": corner_result.get("minimap"),
-                    "trace": corner_result["trace"],
+                    "chart": {"chart_type": "corner_comparison", "spec": chart_spec, "caption": corner_caption, "metadata": chart_meta},
+                    "minimap": {"chart_type": "track_minimap", "spec": minimap_spec, "caption": minimap_caption, "metadata": chart_meta} if minimap_spec else None,
+                    "trace": trace_payload,
                 }
-
-                total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-                yield format_done_event(total_duration_ms)
                 return
 
-            except Exception as e:
-                logger.error(f"Corner telemetry comparison encountered error: {e}", exc_info=True)
-                yield format_error_event(
-                    code="TELEMETRY_ERROR",
-                    message=f"Telemetry error: {str(e)}",
-                    retryable=False,
-                )
-                yield format_done_event(int((time.perf_counter() - start_time) * 1000))
-                return
+            # ==========================================
+            # ROUTE 4: Historical DuckDB SQL Q&A
+            # ==========================================
+            yield format_status_event("analyzing", "Analyzing query and formulating historical parameters...")
 
-        # ==========================================
-        # ROUTE 2: Historical DuckDB SQL Q&A (US1)
-        # ==========================================
-        yield format_status_event("analyzing", "Analyzing query and formulating telemetry/historical parameters...")
+            sql_to_run = self._fallback_generate_sql(user_message)
 
-        sql_to_run = self._fallback_generate_sql(user_message)
+            if not sql_to_run:
+                # Check for ambiguous gibberish
+                q_words = re.findall(r"\b[a-zA-Z]{3,}\b", user_message.lower())
+                f1_common_terms = {
+                    "f1", "race", "grand", "prix", "driver", "team", "points", "winner", "win",
+                    "champion", "championship", "standings", "qualifying", "pole", "lap", "season",
+                    "hamilton", "verstappen", "leclerc", "norris", "alonso", "sainz", "russell", "piastri",
+                    "monza", "silverstone", "spa", "brazil", "monaco", "canada", "austria", "suzuka",
+                    "results", "podium", "podiums", "fastest", "pit", "stop", "stewards", "engine"
+                }
+                has_f1_context = any(w in f1_common_terms for w in q_words)
 
-        if not sql_to_run:
-            last_ent = session.last_entities
-            context_entities_str = ""
-            if last_ent.year or last_ent.grand_prix or last_ent.drivers:
-                context_entities_str = f"Active context from previous turns: Year={last_ent.year}, Grand Prix={last_ent.grand_prix}, Drivers={last_ent.drivers}.\n"
+                if not has_f1_context and len(q_words) > 0 and not any(k in user_message.lower() for k in ["who", "what", "where", "when", "how", "list", "show"]):
+                    clarify_msg = (
+                        "Could you please clarify your request? "
+                        "For car telemetry comparisons (2023–present), specify two drivers, a corner, and a circuit "
+                        "(e.g., 'Compare Verstappen and Norris through Copse at 2024 Silverstone'). "
+                        "For historical race data (1950–2024), you can ask for race results, championship standings, "
+                        "podium progressions, or win percentages."
+                    )
+                    yield format_text_event(clarify_msg)
+                    session.add_user_message(user_message)
+                    session.add_assistant_message(clarify_msg)
+                    return
 
-            prompt_for_sql = (
-                f"{context_entities_str}"
-                f"User asked: '{user_message}'.\n"
-                "Formulate a single read-only DuckDB SQL query to retrieve the exact records. "
-                "Use the curated views: v_race_results, v_qualifying, v_pit_stops, v_driver_standings, or v_constructor_standings.\n"
-                "CRITICAL SQL RULES:\n"
-                "- Always SELECT driver_name (or forename || ' ' || surname AS driver_name). Never rely on driver_code as primary label!\n"
-                "- When grouping drivers, always GROUP BY driver_id, driver_name.\n"
-                "- For circuit/GP filtering, use circuit_country or lower(grand_prix) LIKE '%<name>%' (e.g. for Brazil, use circuit_country = 'Brazil' or grand_prix LIKE '%São Paulo%' or grand_prix LIKE '%Brazil%').\n"
-                "- For starts/win percentage, use COUNT(DISTINCT race_id) for starts and COUNT(DISTINCT CASE WHEN position = 1 THEN race_id END) for wins, and filter status NOT IN ('Did not qualify', 'Did not prequalify', 'Did not start', 'Withdrew').\n"
-                "- Add LIMIT 15 with secondary tie-breaker sorting.\n"
-                "Output ONLY the SQL wrapped in ```sql ... ```."
+            yield format_status_event("querying_sql", "Delegating historical query to HistoricalSQLAgent...")
+
+            hist_res = await self.a2a.query_historical(
+                question=user_message if not sql_to_run else None,
+                sql=sql_to_run,
+                chart_title=user_message,
             )
-            messages = session.get_context(provider=self.provider)["messages"] + [
-                {"role": "user", "content": prompt_for_sql}
-            ]
 
-            try:
-                if self.provider == "gemini" and self.api_key:
-                    llm_text = await self._call_gemini(messages)
-                    sql_to_run = self._extract_sql_from_response(llm_text)
-                elif self.provider == "ollama":
-                    llm_text = await self._call_ollama(session.get_context(provider="ollama")["messages"] + [{"role": "user", "content": prompt_for_sql}])
-                    sql_to_run = self._extract_sql_from_response(llm_text)
-            except Exception as e:
-                logger.warning(f"Primary LLM query generation encountered: {e}. Falling back...")
-                if self.provider == "gemini":
-                    try:
-                        llm_text = await self._call_ollama(session.get_context(provider="ollama")["messages"] + [{"role": "user", "content": prompt_for_sql}])
-                        sql_to_run = self._extract_sql_from_response(llm_text)
-                    except Exception as ollama_err:
-                        logger.error(f"Ollama fallback also failed: {ollama_err}")
+            if not hist_res.get("success") or hist_res.get("row_count", 0) == 0:
+                if hist_res.get("row_count", 0) == 0 and not sql_to_run:
+                    clarify_msg = (
+                        "Could you please clarify your request? "
+                        "For car telemetry comparisons (2023–present), specify two drivers, a corner, and a circuit "
+                        "(e.g., 'Compare Verstappen and Norris through Copse at 2024 Silverstone'). "
+                        "For historical race data (1950–2024), you can ask for race results, championship standings, "
+                        "podium progressions, or win percentages."
+                    )
+                    yield format_text_event(clarify_msg)
+                    session.add_user_message(user_message)
+                    session.add_assistant_message(clarify_msg)
+                    return
+                else:
+                    err_msg = hist_res.get("error") or "No records matched the criteria in the historical database."
+                    yield format_text_event(f"Copy that. {err_msg}")
+                    return
 
-        # DO NOT run a phantom fallback query (e.g. 2023 Abu Dhabi)!
-        if not sql_to_run:
-            clarify_msg = (
-                "Could you please clarify your request? "
-                "For car telemetry comparisons (2023–present), specify two drivers, a corner, and a circuit "
-                "(e.g., 'Compare Verstappen and Norris through Copse at 2024 Silverstone'). "
-                "For historical race data (1950–2024), you can ask for race results, championship standings, "
-                "podium progressions, or win percentages."
+            dataset_id = hist_res["dataset_id"]
+            viz_res = await self.a2a.render_viz(
+                dataset_id=dataset_id,
+                user_query=user_message,
+                domain="historical_sql",
+                summary=hist_res.get("summary", ""),
             )
-            yield format_text_event(clarify_msg)
-            session.add_user_message(user_message)
-            session.add_assistant_message(clarify_msg)
-            total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-            yield format_done_event(total_duration_ms)
-            return
 
-        sql_cache_key = f"sql:{hashlib.sha256(sql_to_run.strip().lower().encode('utf-8')).hexdigest()}"
-        if sql_cache_key in _RESPONSE_CACHE:
-            cached = _RESPONSE_CACHE[sql_cache_key]
-            yield format_status_event("cached_response", "Retrieving verified race trace from cache...")
-            if cached.get("trace"):
-                yield format_trace_event(**cached["trace"])
-            if cached.get("chart"):
+            hops = self.a2a.get_hops()
+            trace_payload = {
+                "data_domain": "historical",
+                "query": hist_res.get("trace", {}).get("sql", sql_to_run),
+                "execution_time_ms": hist_res.get("execution_time_ms"),
+                "row_count": hist_res.get("row_count"),
+                "confidence": 1.0,
+                "dataset_id": dataset_id,
+                "a2a_hops": hops,
+                "notes": "Verified against DuckDB curated views with zero hallucination via HistoricalSQLAgent.",
+            }
+            yield format_trace_event(**trace_payload)
+
+            hist_caption = hist_res.get("summary", user_message)
+            if viz_res.get("figure"):
                 yield format_chart_event(
-                    cached["chart"]["chart_type"],
-                    cached["chart"]["spec"],
-                    cached["chart"].get("caption", ""),
-                    metadata=cached["chart"].get("metadata"),
+                    chart_type=viz_res.get("chart_type", "historical_sql"),
+                    spec=viz_res["figure"],
+                    caption=hist_caption,
+                    metadata=viz_res.get("metadata"),
                 )
+
             yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
-            words = cached["text"].split(" ")
-            for i in range(0, len(words), 3):
-                chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
+
+            engineer_text = ""
+            fb_text = hist_res.get("summary", f"Confirmed on timing data: {hist_res.get('row_count', 0)} verified records retrieved.")
+            prompt = (
+                f"User Question: '{user_message}'\n"
+                f"Historical Records Summary:\n{hist_res.get('summary')}\n\n"
+                "Instructions:\n"
+                "- A chart or table is already plotted on the user's screen. Do not recite every row.\n"
+                "- Provide a concise, high-signal 2 to 3 sentence race engineer summary in authentic F1 radio tone.\n"
+                "- Direct answer first, followed by key totals and notable records.\n"
+                "- Strictly quote exact numbers from the summary."
+            )
+            async for chunk in self._stream_commentary_helper(prompt, fb_text, session):
                 yield format_text_event(chunk)
-                await asyncio.sleep(0.01)
-            total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-            yield format_done_event(total_duration_ms)
+                engineer_text += chunk
+
+            session.add_user_message(user_message)
+            session.add_assistant_message(engineer_text)
+            session.update_entities(tool="historical_sql")
+
+            cache_key = f"sql:{hashlib.sha256(user_message.strip().lower().encode('utf-8')).hexdigest()}"
+            _RESPONSE_CACHE[cache_key] = {
+                "text": engineer_text,
+                "chart": {"chart_type": "historical_sql", "spec": viz_res.get("figure"), "caption": hist_caption, "metadata": viz_res.get("metadata")},
+                "trace": trace_payload,
+            }
             return
 
-        yield format_status_event("querying_sql", "Executing verified query against historical DuckDB database...")
+        except Exception as e:
+            logger.error(f"Orchestrator stream_query uncaught exception: {e}", exc_info=True)
+            yield format_error_event("ORCHESTRATOR_ERROR", f"PitWall Engineer runtime error: {str(e)}")
+            yield format_text_event(f"Telemetry warning: We encountered an unexpected error processing your request: {str(e)}")
 
-        tool_result = await asyncio.to_thread(query_historical_f1, sql_to_run, chart_title=user_message)
-        if tool_result.get("data") and len(tool_result["data"]) > 0:
-            first_row = tool_result["data"][0]
-            ent_year = first_row.get("year")
-            ent_gp = first_row.get("grand_prix")
-            session.update_entities(year=ent_year, grand_prix=ent_gp, tool="historical_sql")
-
-        trace_payload = {
-            "data_domain": "historical",
-            "query": tool_result["sql"],
-            "execution_time_ms": tool_result["execution_time_ms"],
-            "row_count": tool_result["row_count"],
-            "confidence": 1.0,
-            "notes": "Verified against DuckDB curated views with zero hallucination.",
-        }
-        yield format_trace_event(**trace_payload)
-
-        chart_payload = tool_result.get("chart")
-        if chart_payload:
-            yield format_chart_event(
-                chart_type=chart_payload["chart_type"],
-                spec=chart_payload["spec"],
-                caption=chart_payload.get("caption", user_message),
-                metadata=chart_payload.get("metadata"),
-            )
-
-        yield format_status_event("analyzing_results", "Data plotted — Engineer analyzing results...")
-
-        engineer_text = ""
-        async for delta in self._stream_commentary(user_message, tool_result, session):
-            yield format_text_event(delta)
-            engineer_text += delta
-
-        session.add_user_message(user_message)
-        session.add_assistant_message(engineer_text)
-
-        _RESPONSE_CACHE[sql_cache_key] = {
-            "text": engineer_text,
-            "chart": chart_payload,
-            "trace": trace_payload,
-        }
-
-        total_duration_ms = int((time.perf_counter() - start_time) * 1000)
-        yield format_done_event(total_duration_ms)
+        finally:
+            total_duration_ms = int((time.perf_counter() - start_time) * 1000)
+            yield format_done_event(total_duration_ms)

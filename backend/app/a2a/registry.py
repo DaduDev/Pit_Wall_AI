@@ -80,6 +80,11 @@ class ResearchQueryRequest(BaseModel):
     query: str
 
 
+class ResolveCornerRequest(BaseModel):
+    circuit: str
+    corner_query: str
+
+
 class VizRenderRequest(BaseModel):
     dataset_id: str
     user_query: str = ""
@@ -249,6 +254,13 @@ async def research_query(req: ResearchQueryRequest):
     """Direct research query endpoint for ResearchAgent."""
     agent = get_research_agent()
     return agent.research_topic(req.query)
+
+
+@router.post("/research/resolve-corner")
+async def research_resolve_corner(req: ResolveCornerRequest):
+    """Direct corner nickname learning & MultiViewer geometry validation endpoint for ResearchAgent."""
+    agent = get_research_agent()
+    return agent.resolve_and_learn_corner(circuit=req.circuit, corner_query=req.corner_query)
 
 
 @router.post("/research")
