@@ -1,0 +1,56 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M8DNZNF4NSJ4DEZF5QZWB2B5",
+  "session_id": "e52e5399-a9e6-4189-b2f6-798ed5d0de03",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-27T05:00:03.5222847Z",
+  "branch": "feat/a2a-multi-agent",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    "backend/app/a2a/agents/presentation_agent.py",
+    "backend/app/a2a/registry.py",
+    "backend/app/agent/orchestrator.py",
+    "frontend/src/components/ChartStage/ChartStage.tsx",
+    "frontend/src/components/ChatPanel/MessageBubble.tsx",
+    "frontend/src/components/EngineeringTrace/TraceDrawer.tsx",
+    "frontend/src/hooks/useSSEStream.ts",
+    "frontend/src/types/index.ts"
+  ],
+  "agent": "Antigravity",
+  "model": "",
+  "turn_id": "81192c648a72",
+  "checkpoint_transcript_start": 4529,
+  "transcript_lines_at_start": 4529,
+  "token_usage": {
+    "input_tokens": 563255,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 15369309,
+    "output_tokens": 120092,
+    "api_call_count": 140
+  },
+  "session_token_usage": {
+    "input_tokens": 9602358,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 255171503,
+    "output_tokens": 1187147,
+    "api_call_count": 1878
+  },
+  "redaction": {
+    "replacements": 95,
+    "layers": {
+      "betterleaks": 28,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 49,
+      "credentialed_uri": 0,
+      "entropy": 18,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 10
+  }
+}

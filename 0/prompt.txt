@@ -1,0 +1,37 @@
+Execute Pass 2 of the Google ADK + A2A migration sequentially without spawning parallel subagents: cut over `backend/app/agent/orchestrator.py` and the React frontend from the legacy `if/elif` router to the 4 verified Pass 1 A2A specialist agents.
+
+1. Build Async A2A Client (`backend/app/a2a/client.py`):
+   - Implement a lightweight async `A2AClient` using `httpx.AsyncClient` that discovers the 4 mounted specialists via their `/.well-known/agent-card.json` endpoints (base URL configurable via env vars, defaulting to the local server or FastAPI ASGI transport so single-process local dev and Cloud Run never deadlock on self-calls).
+   - Call the exact Pass 1 verified endpoints:
+     * Historical: `POST /a2a/historical/query` (passing `question` for natural-language SQL generation + alias normalization)
+     * Telemetry: `POST /a2a/telemetry/compare-corners`, `/a2a/telemetry/compare-lap`, `/a2a/telemetry/tyre-stints`
+     * Research: `POST /a2a/research/query` (and `resolve_and_learn_corner` when an unknown corner nickname is encountered)
+     * Presentation: `POST /a2a/viz/render` (passing `dataset_id`, `user_query`, `domain`, and optional `display_preferences`)
+   - Record every A2A hop (`agent_name`, `endpoint`, `duration_ms`, `dataset_id`, `status`) so the orchestrator can stream the live A2A hop trace to the frontend.
+
+2. Cut Over `backend/app/agent/orchestrator.py` (Delete Legacy `if/elif` Router):
+   - Remove the legacy hardcoded `if/elif` intent-routing branches and direct local data-tool execution from `orchestrator.py`.
+   - Wire the root `PitWallEngineer` Google ADK agent (`LlmAgent` with Gemini, preserving offline Ollama `qwen3.5:4b` compatibility) with clean A2A delegation tools backed by `A2AClient` so the LLM routes intent to the right specialist(s) instead of regex/if-else branching.
+   - Maintain multi-turn session state (`last_year`, `last_circuit`, `last_drivers`, `last_session`): inherit ONLY omitted fields on follow-ups (e.g., "Now zoom into Parabolica", "just Leclerc")—NEVER override explicitly named drivers, circuits, or years.
+   - Self-healing unknown corner loop: if `TelemetryAgent` returns an unknown-corner error for a 2023+ session, delegate to `ResearchAgent` (`resolve_and_learn_corner`) over A2A to verify the turn number against MultiViewer geometry, persist to `learned_aliases.json`, and retry `TelemetryAgent` once cleanly.
+   - Always pass any non-null `dataset_id` from `Historical`, `Telemetry`, or `Research` to `PresentationAgent` (`/a2a/viz/render`) to produce the normalized visual payload (`figure` + `metadata` OR `web_intelligence_card`).
+   - Enforce strict SSE event ordering inside `try ... except ... finally`:
+     `status` -> `trace` (including `a2a_hops`, `dataset_id`, SQL / OpenF1 `session_key`, grounding sources) -> `chart` or `web_card` -> streamed `text` (concise, grounded PitWall radio narration using ONLY verified metrics from the specialist summaries) -> guaranteed `done`.
+   - Zero silent errors: any era-boundary refusal (`< 2023` telemetry), unrecognized corner after retry, or specialist error MUST yield a clear user-facing `error` or `text` SSE message before `done`.
+
+3. Update React Frontend (`frontend/src/`):
+   - Handle `web_intelligence_card` payloads in the Telemetry & Visual Analytics Stage: render a dark `#0B0F17` HUD "Web Intelligence & Grounded Sources" card with the summary, bullet points, clickable source links, and `"Google Search Grounding"` badge—never mounting Plotly when `viz_type === "web_intelligence_card"`.
+   - Update the Engineering Trace drawer to display the live **A2A Hop Trace** (e.g., `PitWallEngineer -> TelemetryAgent -> PresentationAgent` with latency ms and `dataset_id`), alongside SQL / OpenF1 `session_key` / grounding sources.
+   - Ensure `error` SSE events (or streams closing with empty assistant text) render a styled inline PitWall warning bubble in the chat timeline instead of disappearing silently, and clear the loading status pill as soon as the first text token or error arrives.
+
+4. End-to-End Verification (`backend/tests/test_a2a_orchestrator_e2e.py` + frontend build):
+   - Test `POST /api/chat/stream` end-to-end across all 4 A2A specialists:
+     1. Corner telemetry (`130R` at 2024 Suzuka Qualifying `VER` vs `NOR`) -> asserts `a2a_hops` includes `telemetry` + `viz`, real apex speeds, valid `figure` and `metadata.drivers`.
+     2. Full-lap telemetry (`RUS` vs `VER` 2024 Canadian GP Qualifying) -> asserts valid `figure`, zero `NaN`, and `metadata.drivers == [RUS, VER]`.
+     3. Tyre stints (`LEC` vs `PIA` 2024 Italian GP Race, then follow-up solo `LEC`) -> asserts distinct `dataset_id`s and solo `LEC` contains zero `PIA` traces.
+     4. Historical SQL (`Who won the 2021 Brazilian Grand Prix and what was the winning margin over P2?`) -> asserts `historical` + `viz` hops and valid `figure`.
+     5. Web research (`2021 Brazilian GP Turn 4 incident`) -> asserts `research` + `viz` hops and `web_intelligence_card` payload with clickable sources.
+     6. Era refusal (`2021 Brazil telemetry`) & invalid corner (`Turn 99 Suzuka`) -> asserts non-empty user-facing message before `done`.
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+Report which legacy routing blocks were removed from `orchestrator.py`, confirm how self-calls avoid ASGI/HTTP deadlocks, and summarize pytest + frontend build results.
