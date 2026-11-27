@@ -124,33 +124,39 @@ backend/
 
 frontend/
 ├── src/
-│   ├── main.tsx                   # React entry point
-│   ├── App.tsx                    # Root layout (dark pit-wall shell)
+│   ├── main.tsx                        # React entry point
+│   ├── App.tsx                         # Single-column conversational HUD shell, slim header (+ New Session), centered feed & floating composer
 │   ├── components/
 │   │   ├── ChatPanel/
-│   │   │   ├── ChatPanel.tsx      # Left panel: chat input + message list
-│   │   │   ├── MessageBubble.tsx  # Individual message rendering
-│   │   │   ├── PresetPrompts.tsx  # Quick-start prompt buttons
-│   │   │   └── StreamingStatus.tsx # Live progress feed
+│   │   │   ├── WelcomeHero.tsx         # Empty-state hero + 2x2 starter prompt cards
+│   │   │   ├── TurnItem.tsx            # Per-turn feed item (Status -> Visual Artifact -> Prose -> Collapsible Trace)
+│   │   │   ├── MessageBubble.tsx       # User bubble & Race Engineer markdown commentary
+│   │   │   ├── ComposerBar.tsx         # Floating bottom dark pill composer (Prompts popover, textarea, mic slot, Send)
+│   │   │   ├── PresetPrompts.tsx       # Categorized quick-prompt popover menu
+│   │   │   └── StreamingStatus.tsx     # Live per-turn SSE progress pill
 │   │   ├── ChartStage/
-│   │   │   ├── ChartStage.tsx     # Right panel: Plotly chart display area
-│   │   │   ├── PlotlyChart.tsx    # react-plotly.js wrapper with dark theme
-│   │   │   └── TrackMiniMap.tsx   # GPS track mini-map for corner comparisons
+│   │   │   ├── ChartStage.tsx          # Inline turn visual renderer (Plotly, KpiCard, DataTableCard, WebIntelligenceCard, fullscreen modal)
+│   │   │   ├── PlotlyChart.tsx         # Responsive Plotly wrapper (`useResizeHandler={true}`, dark `#0B0F17`)
+│   │   │   ├── TrackMiniMap.tsx        # GPS track mini-map for corner comparisons
+│   │   │   ├── SectorSummaryBar.tsx    # Full-lap sector & speed-trap splits
+│   │   │   ├── KpiCard.tsx             # Single-row HUD KPI card
+│   │   │   ├── DataTableCard.tsx       # Multi-row HUD classification table
+│   │   │   └── WebIntelligenceCard.tsx # Research grounding / fallback summary card
 │   │   ├── EngineeringTrace/
-│   │   │   └── TraceDrawer.tsx    # Collapsible drawer showing SQL/telemetry params
+│   │   │   └── TraceDrawer.tsx         # Compact single-line toggle expanding full provenance & A2A hops
 │   │   ├── MetadataBar/
-│   │   │   └── MetadataBar.tsx    # Session/lap metadata display strip
+│   │   │   └── MetadataBar.tsx         # Session/lap/driver badges strip
 │   │   └── Auth/
-│   │       └── LoginPage.tsx      # Authentication gate
+│   │       └── LoginPage.tsx           # Authentication gate
 │   ├── hooks/
-│   │   ├── useSSEStream.ts        # SSE connection to /api/chat/stream
-│   │   └── useAuth.ts             # Authentication state management
+│   │   ├── useSSEStream.ts             # SSE connection binding per-turn chart/minimap/trace payloads
+│   │   └── useAuth.ts                  # Authentication state management
 │   ├── services/
-│   │   └── api.ts                 # API client (auth, chat endpoints)
+│   │   └── api.ts                      # API client (auth, chat endpoints)
 │   ├── types/
-│   │   └── index.ts               # Shared TypeScript interfaces
+│   │   └── index.ts                    # Shared TypeScript interfaces (`ChatMessage` with inline `chart`/`minimap`/`trace`/`status`)
 │   └── styles/
-│       └── globals.css            # Tailwind base + dark HUD custom properties
+│       └── globals.css                 # Tailwind base + dark HUD custom properties
 ├── tests/
 │   └── smoke.spec.ts              # Playwright: Plotly renders, zero console errors
 ├── index.html

@@ -1,46 +1,178 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { ChatMessage, EngineeringTrace, PlotlySpec } from '../types';
 
 interface UseSSEStreamReturn {
   messages: ChatMessage[];
-  currentStatus: string | null;
-  currentTrace: EngineeringTrace | null;
-  currentChart: PlotlySpec | null;
-  currentMinimap: PlotlySpec | null;
   isStreaming: boolean;
   sessionId: string | null;
   sendMessage: (text: string) => Promise<void>;
   resetChat: () => void;
 }
 
+function buildChartSpecFromSSE(data: any): {
+  kind: 'chart' | 'minimap';
+  spec: PlotlySpec;
+  preserveMinimap: boolean;
+} {
+  const resolvedMeta = data.metadata || data.spec?.metadata || {};
+  const resolvedVizType =
+    data.viz_type || data.spec?.viz_type || data.chart_type || 'historical_sql';
+  const resolvedTitle = data.title || data.spec?.title || data.caption;
+
+  if (
+    resolvedVizType === 'web_intelligence_card' ||
+    data.chart_type === 'web_intelligence_card' ||
+    !!data.web_intelligence_card ||
+    !!data.spec?.web_intelligence_card
+  ) {
+    return {
+      kind: 'chart',
+      preserveMinimap: false,
+      spec: {
+        viz_type: 'web_intelligence_card',
+        chart_type: 'web_intelligence_card',
+        title: resolvedTitle,
+        web_intelligence_card:
+          data.web_intelligence_card ||
+          data.spec?.web_intelligence_card ||
+          data.spec?.web_card ||
+          data.spec,
+        metadata: resolvedMeta,
+      },
+    };
+  }
+
+  if (
+    resolvedVizType === 'kpi_card' ||
+    data.chart_type === 'kpi_card' ||
+    !!data.kpi_card ||
+    !!data.spec?.kpi_card
+  ) {
+    return {
+      kind: 'chart',
+      preserveMinimap: false,
+      spec: {
+        viz_type: 'kpi_card',
+        chart_type: 'kpi_card',
+        title: resolvedTitle,
+        kpi_card: data.kpi_card || data.spec?.kpi_card,
+        metadata: resolvedMeta,
+      },
+    };
+  }
+
+  if (
+    resolvedVizType === 'data_table' ||
+    data.chart_type === 'data_table' ||
+    !!data.data_table ||
+    !!data.spec?.data_table
+  ) {
+    return {
+      kind: 'chart',
+      preserveMinimap: false,
+      spec: {
+        viz_type: 'data_table',
+        chart_type: 'data_table',
+        title: resolvedTitle,
+        data_table: data.data_table || data.spec?.data_table,
+        metadata: resolvedMeta,
+      },
+    };
+  }
+
+  if (resolvedVizType === 'track_minimap' || data.chart_type === 'track_minimap') {
+    const miniFig = data.figure || data.spec || {};
+    return {
+      kind: 'minimap',
+      preserveMinimap: true,
+      spec: {
+        ...miniFig,
+        viz_type: 'track_minimap',
+        chart_type: 'track_minimap',
+        metadata: resolvedMeta,
+      },
+    };
+  }
+
+  const figPayload = data.figure || data.spec || {};
+  const isCorner =
+    resolvedVizType === 'corner_telemetry' || data.chart_type === 'corner_comparison';
+  return {
+    kind: 'chart',
+    preserveMinimap: isCorner,
+    spec: {
+      ...figPayload,
+      viz_type: resolvedVizType,
+      chart_type: data.chart_type,
+      title: resolvedTitle,
+      metadata: resolvedMeta,
+    },
+  };
+}
+
+function upsertAssistantMessage(
+  prev: ChatMessage[],
+  assistantMsgId: string,
+  timestamp: string,
+  updater: (existing: ChatMessage) => ChatMessage
+): ChatMessage[] {
+  const existing = prev.find((m) => m.id === assistantMsgId);
+  if (existing) {
+    return prev.map((m) => (m.id === assistantMsgId ? updater(m) : m));
+  }
+  const base: ChatMessage = {
+    id: assistantMsgId,
+    role: 'assistant',
+    content: '',
+    timestamp,
+    isStreaming: true,
+    status: null,
+    chart: null,
+    minimap: null,
+    trace: null,
+  };
+  return [...prev, updater(base)];
+}
+
 export function useSSEStream(token?: string | null): UseSSEStreamReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [currentStatus, setCurrentStatus] = useState<string | null>(null);
-  const [currentTrace, setCurrentTrace] = useState<EngineeringTrace | null>(null);
-  const [currentChart, setCurrentChart] = useState<PlotlySpec | null>(null);
-  const [currentMinimap, setCurrentMinimap] = useState<PlotlySpec | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const sessionGenerationRef = useRef(0);
 
   const sendMessage = useCallback(
     async (text: string) => {
-      if (!text.trim() || isStreaming) return;
+      const trimmed = text.trim();
+      if (!trimmed || isStreaming) return;
 
+      const gen = sessionGenerationRef.current;
+      const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const userMsg: ChatMessage = {
         id: `usr_${Date.now()}`,
         role: 'user',
-        content: text.trim(),
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        content: trimmed,
+        timestamp: nowTime,
       };
 
-      setMessages((prev) => [...prev, userMsg]);
-      setIsStreaming(true);
-      setCurrentChart(null);
-      setCurrentMinimap(null);
-      setCurrentTrace(null);
-      setCurrentStatus('Initializing connection to Pit Wall...');
-
       const assistantMsgId = `ast_${Date.now()}`;
+      const assistantPlaceholder: ChatMessage = {
+        id: assistantMsgId,
+        role: 'assistant',
+        content: '',
+        timestamp: nowTime,
+        isStreaming: true,
+        status: 'Initializing connection to Pit Wall...',
+        chart: null,
+        minimap: null,
+        trace: null,
+      };
+
+      setMessages((prev) => [...prev, userMsg, assistantPlaceholder]);
+      setIsStreaming(true);
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
       let accumulatedText = '';
 
       try {
@@ -55,9 +187,10 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
           method: 'POST',
           headers,
           body: JSON.stringify({
-            message: text.trim(),
+            message: trimmed,
             session_id: sessionId,
           }),
+          signal: controller.signal,
         });
 
         if (!res.ok) {
@@ -72,14 +205,14 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
 
         while (true) {
           const { value, done } = await reader.read();
-          if (done) break;
+          if (done || sessionGenerationRef.current !== gen) break;
 
           buffer += decoder.decode(value, { stream: true });
           const frames = buffer.split('\n\n');
           buffer = frames.pop() || '';
 
           for (const frame of frames) {
-            if (!frame.trim()) continue;
+            if (!frame.trim() || sessionGenerationRef.current !== gen) continue;
 
             const lines = frame.split('\n');
             let eventType = 'message';
@@ -103,39 +236,28 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
                   if (data.session_id) setSessionId(data.session_id);
                   break;
 
-                case 'status':
-                  setCurrentStatus(data.detail || data.step || data.message);
+                case 'status': {
+                  const statusText = data.detail || data.step || data.message || null;
+                  setMessages((prev) =>
+                    upsertAssistantMessage(prev, assistantMsgId, nowTime, (m) => ({
+                      ...m,
+                      status: m.content ? null : statusText,
+                    }))
+                  );
                   break;
+                }
 
                 case 'text':
                   if (data.delta) {
                     accumulatedText += data.delta;
-                    // Clear the status pill as soon as the first text chunk arrives
-                    setCurrentStatus(null);
-                    setMessages((prev) => {
-                      const existing = prev.find((m) => m.id === assistantMsgId);
-                      if (existing) {
-                        return prev.map((m) =>
-                          m.id === assistantMsgId
-                            ? { ...m, content: accumulatedText, isStreaming: true }
-                            : m
-                        );
-                      } else {
-                        return [
-                          ...prev,
-                          {
-                            id: assistantMsgId,
-                            role: 'assistant',
-                            content: accumulatedText,
-                            timestamp: new Date().toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            }),
-                            isStreaming: true,
-                          },
-                        ];
-                      }
-                    });
+                    setMessages((prev) =>
+                      upsertAssistantMessage(prev, assistantMsgId, nowTime, (m) => ({
+                        ...m,
+                        content: accumulatedText,
+                        status: null,
+                        isStreaming: true,
+                      }))
+                    );
                   }
                   break;
 
@@ -149,144 +271,58 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
                       data.data_table ||
                       data.web_intelligence_card)
                   ) {
-                    const resolvedMeta = data.metadata || data.spec?.metadata || {};
-                    const resolvedVizType =
-                      data.viz_type || data.spec?.viz_type || data.chart_type || 'historical_sql';
-                    const resolvedTitle = data.title || data.spec?.title || data.caption;
-
-                    if (
-                      resolvedVizType === 'web_intelligence_card' ||
-                      data.chart_type === 'web_intelligence_card' ||
-                      !!data.web_intelligence_card ||
-                      !!data.spec?.web_intelligence_card
-                    ) {
-                      setCurrentChart({
-                        viz_type: 'web_intelligence_card',
-                        chart_type: 'web_intelligence_card',
-                        title: resolvedTitle,
-                        web_intelligence_card:
-                          data.web_intelligence_card ||
-                          data.spec?.web_intelligence_card ||
-                          data.spec?.web_card ||
-                          data.spec,
-                        metadata: resolvedMeta,
-                      });
-                      setCurrentMinimap(null);
-                    } else if (
-                      resolvedVizType === 'kpi_card' ||
-                      data.chart_type === 'kpi_card' ||
-                      !!data.kpi_card ||
-                      !!data.spec?.kpi_card
-                    ) {
-                      setCurrentChart({
-                        viz_type: 'kpi_card',
-                        chart_type: 'kpi_card',
-                        title: resolvedTitle,
-                        kpi_card: data.kpi_card || data.spec?.kpi_card,
-                        metadata: resolvedMeta,
-                      });
-                      setCurrentMinimap(null);
-                    } else if (
-                      resolvedVizType === 'data_table' ||
-                      data.chart_type === 'data_table' ||
-                      !!data.data_table ||
-                      !!data.spec?.data_table
-                    ) {
-                      setCurrentChart({
-                        viz_type: 'data_table',
-                        chart_type: 'data_table',
-                        title: resolvedTitle,
-                        data_table: data.data_table || data.spec?.data_table,
-                        metadata: resolvedMeta,
-                      });
-                      setCurrentMinimap(null);
-                    } else if (
-                      resolvedVizType === 'track_minimap' ||
-                      data.chart_type === 'track_minimap'
-                    ) {
-                      const miniFig = data.figure || data.spec || {};
-                      setCurrentMinimap({
-                        ...miniFig,
-                        viz_type: 'track_minimap',
-                        chart_type: 'track_minimap',
-                        metadata: resolvedMeta,
-                      });
-                    } else {
-                      const figPayload = data.figure || data.spec || {};
-                      setCurrentChart({
-                        ...figPayload,
-                        viz_type: resolvedVizType,
-                        chart_type: data.chart_type,
-                        title: resolvedTitle,
-                        metadata: resolvedMeta,
-                      });
-                      if (
-                        resolvedVizType !== 'corner_telemetry' &&
-                        data.chart_type !== 'corner_comparison'
-                      ) {
-                        setCurrentMinimap(null);
-                      }
-                    }
+                    const parsed = buildChartSpecFromSSE(data);
+                    setMessages((prev) =>
+                      upsertAssistantMessage(prev, assistantMsgId, nowTime, (m) => {
+                        if (parsed.kind === 'minimap') {
+                          return { ...m, minimap: parsed.spec };
+                        }
+                        return {
+                          ...m,
+                          chart: parsed.spec,
+                          minimap: parsed.preserveMinimap ? m.minimap ?? null : null,
+                        };
+                      })
+                    );
                   }
                   break;
 
                 case 'trace':
-                  setCurrentTrace(data);
+                  setMessages((prev) =>
+                    upsertAssistantMessage(prev, assistantMsgId, nowTime, (m) => ({
+                      ...m,
+                      trace: data as EngineeringTrace,
+                    }))
+                  );
                   break;
 
-                case 'error':
+                case 'error': {
                   const errorDetail = data.message || data.error || 'Unknown telemetry error';
-                  setCurrentStatus(null);
-                  accumulatedText += (accumulatedText ? '\n\n' : '') + `⚠️ **PitWall Error**: ${errorDetail}`;
-                  setMessages((prev) => {
-                    const existing = prev.find((m) => m.id === assistantMsgId);
-                    if (existing) {
-                      return prev.map((m) =>
-                        m.id === assistantMsgId
-                          ? { ...m, content: accumulatedText, isStreaming: false }
-                          : m
-                      );
-                    } else {
-                      return [
-                        ...prev,
-                        {
-                          id: assistantMsgId,
-                          role: 'assistant',
-                          content: accumulatedText,
-                          timestamp: new Date().toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          }),
-                          isStreaming: false,
-                        },
-                      ];
-                    }
-                  });
+                  accumulatedText +=
+                    (accumulatedText ? '\n\n' : '') + `⚠️ **PitWall Error**: ${errorDetail}`;
+                  setMessages((prev) =>
+                    upsertAssistantMessage(prev, assistantMsgId, nowTime, (m) => ({
+                      ...m,
+                      content: accumulatedText,
+                      status: null,
+                      isStreaming: false,
+                    }))
+                  );
                   break;
+                }
 
                 case 'done':
-                  setCurrentStatus(null);
-                  setMessages((prev) => {
-                    const existing = prev.find((m) => m.id === assistantMsgId);
-                    if (!existing && !accumulatedText) {
-                      return [
-                        ...prev,
-                        {
-                          id: assistantMsgId,
-                          role: 'assistant',
-                          content: '⚠️ **PitWall Notice**: Query completed with no telemetry commentary.',
-                          timestamp: new Date().toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          }),
-                          isStreaming: false,
-                        },
-                      ];
-                    }
-                    return prev.map((m) =>
-                      m.id === assistantMsgId ? { ...m, isStreaming: false } : m
-                    );
-                  });
+                  setMessages((prev) =>
+                    upsertAssistantMessage(prev, assistantMsgId, nowTime, (m) => ({
+                      ...m,
+                      content:
+                        !m.content && !m.chart
+                          ? '⚠️ **PitWall Notice**: Query completed with no telemetry commentary.'
+                          : m.content,
+                      status: null,
+                      isStreaming: false,
+                    }))
+                  );
                   break;
               }
             } catch (jsonErr) {
@@ -295,45 +331,49 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
           }
         }
       } catch (err: any) {
+        if (err?.name === 'AbortError' || sessionGenerationRef.current !== gen) {
+          return;
+        }
         console.error('SSE streaming error:', err);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `err_${Date.now()}`,
-            role: 'assistant',
-            content: `Telemetry error: ${err.message || 'Connection lost to PitWall server.'}`,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            isStreaming: false,
-          },
-        ]);
-      } finally {
+        accumulatedText +=
+          (accumulatedText ? '\n\n' : '') +
+          `⚠️ **PitWall Error**: ${err.message || 'Connection lost to PitWall server.'}`;
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsgId ? { ...m, isStreaming: false } : m
-          )
+          upsertAssistantMessage(prev, assistantMsgId, nowTime, (m) => ({
+            ...m,
+            content: accumulatedText,
+            status: null,
+            isStreaming: false,
+          }))
         );
-        setIsStreaming(false);
-        setCurrentStatus(null);
+      } finally {
+        if (sessionGenerationRef.current === gen) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, status: null, isStreaming: false } : m
+            )
+          );
+          setIsStreaming(false);
+          abortControllerRef.current = null;
+        }
       }
     },
     [isStreaming, sessionId, token]
   );
 
   const resetChat = useCallback(() => {
+    sessionGenerationRef.current += 1;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsStreaming(false);
     setMessages([]);
-    setCurrentStatus(null);
-    setCurrentTrace(null);
-    setCurrentChart(null);
-    setCurrentMinimap(null);
     setSessionId(null);
   }, []);
 
   return {
     messages,
-    currentStatus,
-    currentTrace,
-    currentChart,
-    currentMinimap,
     isStreaming,
     sessionId,
     sendMessage,

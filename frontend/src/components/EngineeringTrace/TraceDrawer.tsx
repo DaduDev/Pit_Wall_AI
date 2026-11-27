@@ -1,13 +1,23 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Copy, Check, Terminal, Clock, ArrowRight, Layers, ExternalLink } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Check,
+  Terminal,
+  Clock,
+  ArrowRight,
+  Layers,
+  ExternalLink,
+} from 'lucide-react';
 import { EngineeringTrace } from '../../types';
 
 interface TraceDrawerProps {
-  trace: EngineeringTrace | null;
+  trace?: EngineeringTrace | null;
 }
 
 export function TraceDrawer({ trace }: TraceDrawerProps) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
   if (!trace) {
@@ -33,6 +43,13 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
     }
   };
 
+  const getProviderShortTag = () => {
+    if (trace.provider) return trace.provider;
+    if (isResearch) return 'gemini';
+    if (isTelemetry) return 'openf1';
+    return 'duckdb';
+  };
+
   const getProviderLabel = () => {
     if (trace.provider === 'ollama_fallback') return 'Ollama Fallback (qwen3.5)';
     if (trace.provider === 'cache') return isResearch ? 'Research Disk Cache' : 'Persistent Cache';
@@ -46,29 +63,55 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
     return 'DuckDB Read-Only';
   };
 
+  const providerTag = getProviderShortTag();
+  const providerColorClass =
+    providerTag === 'ollama_fallback'
+      ? 'border-amber-500/30 bg-amber-950/30 text-amber-400'
+      : providerTag === 'cache'
+      ? 'border-cyan-500/30 bg-cyan-950/30 text-cyan-400'
+      : 'border-emerald-500/30 bg-emerald-950/30 text-emerald-400';
+
   return (
-    <div className="rounded-lg border border-[#1E293B] bg-[#121824] shadow-lg">
+    <div className="rounded-lg border border-[#1E293B] bg-[#121824]/90 shadow-sm">
+      {/* Compact single-line toggle bar */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex w-full items-center justify-between px-4 py-2.5 text-xs font-mono text-[#94A3B8] hover:bg-[#1A2234] transition-colors rounded-t-lg"
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="flex w-full items-center justify-between gap-2 px-3.5 py-2 text-xs font-mono text-[#94A3B8] hover:bg-[#1A2234] transition-colors rounded-lg"
       >
-        <div className="flex items-center space-x-2">
-          <Terminal className="h-3.5 w-3.5 text-[#E10600]" />
-          <span className="font-semibold text-white uppercase tracking-wider">
-            Engineering Trace & Provenance
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <Terminal className="h-3.5 w-3.5 text-[#E10600] shrink-0" />
+          <span className="font-semibold text-[#E2E8F0] uppercase tracking-wider text-[11px]">
+            Engineering Trace
           </span>
           <span className="rounded bg-[#1E293B] px-1.5 py-0.5 text-[10px] text-emerald-400">
             {trace.data_domain.toUpperCase()}
           </span>
+          {hops.length > 0 && (
+            <span className="inline-flex items-center space-x-1 rounded border border-[#1E293B] bg-[#0B0F17] px-1.5 py-0.5 text-[10px] text-[#CBD5E1]">
+              <Layers className="h-2.5 w-2.5 text-cyan-400" />
+              <span>
+                {hops.length} {hops.length === 1 ? 'hop' : 'hops'}
+              </span>
+            </span>
+          )}
+          <span className={`rounded border px-1.5 py-0.5 text-[10px] ${providerColorClass}`}>
+            {providerTag}
+          </span>
         </div>
-        <div className="flex items-center space-x-3">
+
+        <div className="flex items-center space-x-2.5 shrink-0">
           {trace.execution_time_ms !== undefined && (
             <span className="flex items-center space-x-1 text-[11px] text-[#94A3B8]">
               <Clock className="h-3 w-3" />
               <span>{trace.execution_time_ms} ms</span>
             </span>
           )}
-          {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          {isOpen ? (
+            <ChevronUp className="h-4 w-4 text-[#94A3B8]" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-[#94A3B8]" />
+          )}
         </div>
       </button>
 
@@ -101,7 +144,9 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
             </div>
             <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
               <span className="text-[10px] text-[#64748B] block">CONFIDENCE</span>
-              <span className="text-emerald-400 font-medium">{(trace.confidence * 100).toFixed(0)}%</span>
+              <span className="text-emerald-400 font-medium">
+                {(trace.confidence * 100).toFixed(0)}%
+              </span>
             </div>
             <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
               <span className="text-[10px] text-[#64748B] block">PROVIDER</span>
@@ -190,7 +235,9 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
                   <span className="text-emerald-400 font-medium">
                     {Array.isArray(params.lap_numbers)
                       ? params.lap_numbers.join(' | ')
-                      : Object.entries(params.lap_numbers).map(([d, l]) => `${d}: L${l}`).join(' | ')}
+                      : Object.entries(params.lap_numbers)
+                          .map(([d, l]) => `${d}: L${l}`)
+                          .join(' | ')}
                   </span>
                 </div>
               )}
@@ -198,7 +245,8 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
                 <div className="rounded border border-[#1E293B] bg-[#0B0F17] p-2">
                   <span className="text-[10px] text-[#64748B] block">SECTORS</span>
                   <span className="text-amber-400 font-medium">
-                    S1: {Math.round(params.sector_boundaries_m[0])}m | S2: {Math.round(params.sector_boundaries_m[1])}m
+                    S1: {Math.round(params.sector_boundaries_m[0])}m | S2:{' '}
+                    {Math.round(params.sector_boundaries_m[1])}m
                   </span>
                 </div>
               )}
@@ -218,7 +266,9 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
                   <span className="text-amber-400 font-medium">
                     {Object.entries(params.clean_lap_counts)
                       .map(([d, c]) => {
-                        const out = params.excluded_lap_counts ? params.excluded_lap_counts[d] : undefined;
+                        const out = params.excluded_lap_counts
+                          ? params.excluded_lap_counts[d]
+                          : undefined;
                         return out !== undefined ? `${d}: ${c}L (${out} filtered)` : `${d}: ${c}L`;
                       })
                       .join(' | ')}
@@ -271,10 +321,15 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
                   Exact Ground-Truth SQL Statement:
                 </span>
                 <button
+                  type="button"
                   onClick={handleCopy}
                   className="flex items-center space-x-1 text-[11px] hover:text-white transition-colors"
                 >
-                  {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                  {copied ? (
+                    <Check className="h-3 w-3 text-emerald-400" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
                   <span>{copied ? 'Copied' : 'Copy SQL'}</span>
                 </button>
               </div>
@@ -291,10 +346,15 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
                     : 'Ground-Truth Telemetry Trace Parameters:'}
                 </span>
                 <button
+                  type="button"
                   onClick={handleCopy}
                   className="flex items-center space-x-1 text-[11px] hover:text-white transition-colors"
                 >
-                  {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                  {copied ? (
+                    <Check className="h-3 w-3 text-emerald-400" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
                   <span>{copied ? 'Copied' : 'Copy Parameters'}</span>
                 </button>
               </div>
@@ -305,9 +365,7 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
           ) : null}
 
           {trace.notes && (
-            <p className="text-[11px] text-[#94A3B8] italic">
-              Note: {trace.notes}
-            </p>
+            <p className="text-[11px] text-[#94A3B8] italic">Note: {trace.notes}</p>
           )}
         </div>
       )}

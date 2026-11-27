@@ -16,6 +16,10 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   isStreaming?: boolean;
+  status?: string | null;
+  chart?: PlotlySpec | null;
+  minimap?: PlotlySpec | null;
+  trace?: EngineeringTrace | null;
 }
 
 export interface A2AHop {

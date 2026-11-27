@@ -293,6 +293,19 @@
 
 ---
 
+## Phase 14: Single-Column Conversational HUD Redesign
+
+**Purpose**: Redesign the React frontend (`frontend/src/`) from a 2-column split screen with persistent preset list into a ChatGPT/Gemini-style single-column centered conversational HUD on `#0B0F17`, attaching visual artifacts and traces per assistant turn (`Status -> Visual Artifact -> Prose -> Collapsible Trace`).
+
+- [x] T111 Update `frontend/src/types/index.ts` and refactor `frontend/src/hooks/useSSEStream.ts` so each assistant `ChatMessage` owns its own `chart` (`PlotlySpec`), `minimap` (`PlotlySpec`), `trace` (`EngineeringTrace`), and `status` (`string | null`) rather than overwriting global right-panel state, ensuring an assistant placeholder turn is created when `status`, `chart`, `text`, or `trace` arrives first
+- [x] T112 Update `frontend/src/components/ChartStage/PlotlyChart.tsx`, `TrackMiniMap.tsx`, and `ChartStage.tsx` for full-width responsive inline rendering (`useResizeHandler={true}`, `autosize: true`), driver/metadata badges, empty-state omission when inline, and a modal/fullscreen expand toggle for Plotly figures
+- [x] T113 Refactor `frontend/src/components/EngineeringTrace/TraceDrawer.tsx` into a compact single-line collapsed bar by default displaying A2A hop count, provider (`gemini` / `ollama_fallback` / `cache`), and execution latency (`ms`), expanding on click to show full A2A breadcrumbs, `dataset_id`, SQL, telemetry/strategy params, and grounding sources
+- [x] T114 Build `WelcomeHero.tsx` (centered hero + 2x2 starter prompt cards when `messages.length === 0`), compact Quick-Prompts popover in `PresetPrompts.tsx`, `TurnItem.tsx` (`max-w-5xl` per-turn vertical flow: Live Status Pill -> Visual Artifact -> Race Engineer Markdown -> Collapsible Trace Bar), and floating bottom pill `ComposerBar.tsx` (`max-w-3xl`, popover trigger, auto-growing textarea, Voice Pit-Wall Radio mic slot, Send button)
+- [x] T115 Replace the 2-column split layout in `frontend/src/App.tsx` with the centered single-column conversational HUD, keeping the slim top bar (`F1 PITWALL AI`, `DUCKDB`, `FASTF1`, `+ New Session`, sign out) and smooth auto-scroll to newest turns
+- [x] T116 Run `npm run build` in `frontend/` and verify zero TypeScript/Vite errors and no backend SSE contract breakage (`pytest backend/tests/ -v` if needed)
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
