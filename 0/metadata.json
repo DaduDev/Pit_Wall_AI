@@ -1,0 +1,70 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M8EYN573ND1D4D3VZXJV37MS",
+  "session_id": "e52e5399-a9e6-4189-b2f6-798ed5d0de03",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-27T16:50:44.8108899Z",
+  "branch": "feat/a2a-multi-agent",
+  "checkpoints_count": 5,
+  "save_step_count": 4,
+  "files_touched": [
+    "backend/app/a2a/agents/historical_agent.py",
+    "backend/app/a2a/agents/presentation_agent.py",
+    "backend/app/a2a/agents/research_agent.py",
+    "backend/app/a2a/agents/telemetry_agent.py",
+    "backend/app/a2a/client.py",
+    "backend/app/agent/orchestrator.py",
+    "backend/app/agent/tools/telemetry.py",
+    "backend/app/chat/streaming.py",
+    "backend/app/config.py",
+    "backend/tests/conftest.py",
+    "backend/tests/test_a2a_orchestrator_e2e.py",
+    "backend/tests/test_a2a_specialists.py",
+    "frontend/src/components/ChartStage/ChartStage.tsx",
+    "frontend/src/components/ChartStage/WebIntelligenceCard.tsx",
+    "frontend/src/components/EngineeringTrace/TraceDrawer.tsx",
+    "frontend/src/components/MetadataBar/MetadataBar.tsx",
+    "frontend/src/hooks/useSSEStream.ts",
+    "frontend/src/types/index.ts",
+    "specs/001-pitwall-ai/contracts/api-contracts.md",
+    "specs/001-pitwall-ai/plan.md",
+    "specs/001-pitwall-ai/spec.md",
+    "specs/001-pitwall-ai/tasks.md"
+  ],
+  "agent": "Antigravity",
+  "model": "",
+  "turn_id": "054a122d11ba",
+  "checkpoint_transcript_start": 4875,
+  "transcript_lines_at_start": 4875,
+  "token_usage": {
+    "input_tokens": 2431280,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 35968813,
+    "output_tokens": 175292,
+    "api_call_count": 131
+  },
+  "session_token_usage": {
+    "input_tokens": 12033638,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 291140316,
+    "output_tokens": 1362439,
+    "api_call_count": 2009
+  },
+  "redaction": {
+    "replacements": 133,
+    "layers": {
+      "betterleaks": 45,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 69,
+      "credentialed_uri": 0,
+      "entropy": 23,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 15
+  }
+}
