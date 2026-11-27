@@ -1,0 +1,26 @@
+Follow our `.specify` spec-driven workflow (update `.specify/` spec, plan, and tasks FIRST, then implement sequentially without spawning parallel subagents):
+
+Redesign the React frontend (`frontend/src/`) from the 2-column split screen into a sleek, ChatGPT/Gemini-style single-column centered conversational HUD while preserving the `#0B0F17` F1 PitWall dark theme and all existing SSE/A2A functionality:
+
+1. Remove Split-Screen & Persistent Sidebar Prompts:
+   - Delete the 2-column split layout and remove the static vertical list of 11 recommendation buttons that currently sits inside the chat pane.
+   - Keep the slim top header bar (`F1 PITWALL AI`, `DUCKDB` / `FASTF1` status pills) and add a `+ New Session` button to reset the thread cleanly.
+
+2. Empty-State Welcome View & Quick-Prompt Popover:
+   - When `messages.length === 0`, display a centered PitWall AI hero header with 4 concise starter prompt cards (2x2 grid: 1 Corner Telemetry, 1 Full-Lap, 1 Tyre Stints, 1 Historical/Research). Hide this welcome screen immediately once the first message is sent.
+   - Add a small compact `Prompts` / lightning-bolt popover button inside the floating bottom input bar so demo prompts remain 1-click accessible without consuming screen space.
+
+3. Per-Turn Inline Feed (`max-w-5xl` centered, Chart/Card on Top -> Text Below):
+   - Refactor `useSSEStream.ts` and message state so each assistant message owns its own `chart` / `vizPayload` (`figure`, `kpi_card`, `data_table`, `web_intelligence_card`) and `trace` object instead of overwriting a single global right-panel state.
+   - Render each assistant turn vertically in this exact order:
+     1) **Live Status Pill** (while streaming, auto-hides once content arrives).
+     2) **Visual Artifact on Top:** Full-width interactive Plotly chart (`useResizeHandler={true}`, responsive width, driver badges, plus a modal/fullscreen expand toggle), dark HUD `KpiCard`, `DataTable`, or `WebIntelligenceCard`.
+     3) **Race Engineer Text Below:** Clean, readable markdown/prose commentary directly beneath the visual artifact.
+     4) **Collapsible Engineering Trace Bar:** Compact single-line toggle at the bottom of the turn displaying A2A hops, provider (`gemini` / `ollama_fallback` / `cache`), and latency; clicking expands the full `TraceDrawer` (A2A hop breadcrumbs, `dataset_id`, SQL, and grounding sources).
+
+4. Floating Bottom Composer Bar:
+   - Replace the sidebar input with a centered floating dark pill composer pinned to the bottom (`max-w-3xl`), containing: compact Quick-Prompts popover button, auto-growing textarea, placeholder slot ready for the upcoming Voice Pit-Wall Radio mic button, and Send button.
+   - Auto-scroll smoothly to the newest turn while keeping earlier charts/cards scrollable in history.
+
+5. Verify:
+   - Ensure `npm run build` in `frontend/` succeeds with zero TypeScript/Vite errors and no backend SSE contract changes are broken.
