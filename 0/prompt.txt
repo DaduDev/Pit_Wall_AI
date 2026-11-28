@@ -1,0 +1,919 @@
+/speckit-constitution PitWall AI must enforce zero-hallucination math: the LLM must never calculate stats, averages, braking points, or lap deltas from memory—every number must come from DuckDB SQL or deterministic Python/NumPy telemetry calculations. Keep a strict boundary between historical SQL data (1950–2024+) and FastF1 car telemetry (2018+). Use official F1 team colors on a dark telemetry HUD (#0B0F17), always display the exact session/lap metadata and underlying SQL or telemetry trace in the UI, and verify every feature with automated pytest suites against real race data.
+
+---
+
+/speckit-specify Build PitWall AI, an AI Race Engineer web app that answers natural-language Formula 1 questions from 1950 to 2024+ with interactive visualizations.
+
+Core capabilities:
+1. Corner-by-Corner Telemetry Comparison (2018+): Compare any two drivers through a specific corner (by turn number or famous nickname like Copse, Eau Rouge, Maggotts-Becketts, 130R, Parabolica). Default to Qualifying fastest laps when unspecified. Slice entry-apex-exit (+/- 200m), compute braking point delta, apex min speed, lowest gear, full-throttle pickup point, and corner time delta. Render a synchronized multi-panel interactive chart (Speed, Delta, Throttle, Brake, Gear) plus a zoomed GPS track mini-map colored by faster driver, paired with grounded race-engineer commentary.
+2. Full-Lap & Race Strategy Analytics (2018+): Full-lap telemetry overlays, tyre stint degradation (filtering out pit and Safety Car laps), and race position evolution.
+3. Historical Archive Analytics (1950–2024): Answer any career, season, driver, constructor, pit stop, or circuit stat question with an interactive chart/table and the exact SQL query executed.
+4. Ad-Hoc Analysis: Handle custom cross-metric questions not covered by preset charts via safe Python analytics that still return interactive charts.
+5. Transparency & Live Progress: Stream step-by-step tool status while loading data, gracefully explain the 2018 boundary if someone asks for older car telemetry, and show a collapsible Engineering Trace panel with the SQL query or telemetry parameters used.
+6. Winner Prediction: Based on recent form of teams and drivers, shall predict the driver who can win in the particular circuit and have a good scope on the championship title.
+
+---
+
+/speckit-clarify
+
+---
+
+A
+
+---
+
+C — Multi-turn within a session (rolling summary + last 4–6 turns verbatim), stateless across sessions.
+
+---
+
+B
+
+---
+
+C — Cache-first fallback (plus a quick 1–2 retries on transient timeouts before failing if uncached).
+
+---
+
+yes
+
+---
+
+/speckit-plan Use:
+- Backend: Python 3.12+, FastAPI with SSE streaming (/api/chat/stream), Google ADK (google-adk) using gemini-3.8-flash for the orchestrator agent and tool routing, DuckDB for 1950–2024 Kaggle CSV ingestion (normalizing \N to NULL) with curated read-only SQL views (v_race_results, v_qualifying, v_pit_stops, v_driver_standings), FastF1 with persistent disk cache (./data/fastf1_cache) + NumPy 1-meter distance interpolation for corner slicing, and Plotly JSON builders for Tier 1 charts plus a timeout-guarded Python sandbox for Tier 2 ad-hoc Plotly charts.
+- Entity Resolution: Fuzzy driver/circuit resolver plus a curated data/corner_nicknames.json mapping iconic corner nicknames across F1 circuits to FastF1 turn numbers.
+- Frontend: React + TypeScript + Vite + Tailwind CSS + react-plotly.js in a dark F1 pit-wall layout (chat + preset prompts on the left, interactive Plotly stage + collapsible Engineering Trace drawer on the right).
+- Testing: Pytest suite verifying DuckDB \N ingestion, read-only SQL guardrails, corner-slicing math on a cached 2024 British GP Qualifying fixture, and a Playwright smoke test confirming Plotly charts render with zero console errors.
+
+---
+
+Inspect plan.md, research.md, data-model.md, contracts/api-contracts.md, and quickstart.md to confirm none were cut off, and finish any remaining /speckit-plan wrap-up steps (like updating the agent context file). Do not spawn subagents.
+
+---
+
+/speckit-clarify
+
+---
+
+/speckit-tasks
+
+---
+
+/speckit-analyze
+
+---
+
+Apply all 5 remediations from the Specification Analysis Report sequentially without spawning parallel subagents:
+
+1. [I1 — Primary Gemini + Local Ollama Fallback] Update specs/001-pitwall-ai/plan.md, specs/001-pitwall-ai/tasks.md (T022), and AGENTS.md to configure the ADK orchestrator as follows:
+   - Primary LLM: `gemini-3.5-flash-lite` via Google AI Studio (`GOOGLE_API_KEY`). Set `thinking_level="low"` (or `"medium"` for complex queries) so multi-step tool calling does not terminate early, and do NOT pass deprecated `temperature`, `top_p`, or `top_k` parameters.
+   - Automatic & Manual Fallback LLM: Local Ollama via Google ADK `LiteLlm(model="ollama_chat/<OLLAMA_MODEL>")` (default `OLLAMA_MODEL=qwen3.5:4b`, `OLLAMA_API_BASE=http://localhost:11434`). Use `ollama_chat/` (never `ollama/`) to avoid tool-calling loops. Automatically fall back to Ollama if Gemini returns HTTP 429/503 after retry, or force Ollama directly via `.env` (`LLM_PROVIDER=ollama`) for offline dev. When falling back to Ollama, trim conversation context to the last 2 turns so it fits comfortably within 8GB RAM.
+   - Concurrency & Quota Protection: Wrap Gemini calls with an `asyncio.Semaphore(3)` + brief exponential backoff, keep ADK tools coarse-grained (target <=2 LLM calls per user question), and add an in-memory/SQLite response cache for repeat and preset prompts.
+
+2. [C1 — Coverage Gap] Expand tasks.md (T006) to explicitly cite `constructor_standings` (`constructorStandingsId`) and all mandatory NOT NULL / FK columns from data-model.md (`circuits.name`, `constructors.name`, `drivers.forename`, `races.round`, `races.name`, `races.date`, `results.points`, `results.laps`).
+
+3. [U1 — Missing View] Add a curated `v_constructor_standings` view definition to specs/001-pitwall-ai/data-model.md and include it in `backend/app/data/views.py` in tasks.md (T007) alongside `v_driver_standings`.
+
+4. [A1 & D1 — Spec Cleanup] In specs/001-pitwall-ai/spec.md, update FR-020 from "track coordinates" to "track distance (meters) and turn number", and fold FR-021 (±200m entry-apex-exit window) directly into FR-004.
+
+Summarize the exact changes made and stop so I can review before starting Phase 1 implementation.
+
+---
+
+/speckit-implement Execute Phase 1 (Setup) and Phase 2 (Foundational) only from specs/001-pitwall-ai/tasks.md sequentially without spawning parallel subagents.
+
+Requirements for this run:
+- Verify DuckDB ingestion (T006) and all 5 curated views including v_constructor_standings (T007) directly against the real CSVs in ./data/kaggle/ (confirming \N -> NULL conversion and zero ingestion errors).
+- Run pytest on all Phase 1–2 tests and confirm they pass before finishing.
+- Mark completed tasks as [X] in tasks.md, summarize what was built and tested, and stop for my review before starting Phase 3 (User Story 1).
+
+---
+
+/speckit-implement Execute Phase 3 (User Story 1: Historical F1 Question Answering MVP, tasks T017–T027) only from specs/001-pitwall-ai/tasks.md sequentially without spawning parallel subagents.
+
+Guardrails for this phase:
+- Confirm `google-adk` and `google-genai` are listed in backend/requirements.txt and installed in the venv.
+- In T022 (ADK Orchestrator), configure `gemini-3.5-flash-lite` with `thinking_level="low"` (never pass `thinking_budget`, `temperature`, `top_p`, `top_k`, `frequency_penalty`, or `presence_penalty`—they error or are deprecated on 3.5-flash-lite).
+- For the Ollama fallback, use `LiteLlm(model="ollama_chat/<OLLAMA_MODEL>")` (never `ollama/`), trim conversation history to the last 2 turns on fallback, and guard concurrent Gemini calls with `asyncio.Semaphore(3)` + brief backoff + response caching.
+- Keep SQL tools coarse-grained so a standard historical query completes in <=2 LLM calls and streams `status`, `text`, `chart`, `trace`, and `done` SSE frames cleanly.
+- Run `python -m pytest backend/tests/ -v` and verify the frontend builds cleanly (`npm install && npm run build` inside `frontend/`).
+- Mark completed tasks T017–T027 as [X] in tasks.md, summarize what was built and verified, and stop for my review before starting Phase 4.
+
+---
+
+Let me test this now, shall I?
+
+---
+
+Fix two sets of bugs discovered during live testing of Phase 3 (sequentially, no subagents):
+
+1. Historical SQL Prompt & View Rules (backend/app/agent/ or SQL tool instructions):
+   - Always select a single `forename || ' ' || surname AS driver_name` label column (never rely on `driver_code` as the primary label since pre-2004 drivers have NULL codes) and group by `driver_id` (plus name columns).
+   - For any "race starts" or "win percentage" query, instruct the SQL agent to use `COUNT(DISTINCT race_id)` (and `COUNT(DISTINCT CASE WHEN position = 1 THEN race_id END)` for wins) to prevent double-counting 1950s shared drives, and filter out non-starts (`status NOT IN ('Did not qualify', 'Did not prequalify', 'Did not start', 'Withdrew')`).
+   - Add a sensible `LIMIT 15` (with secondary tie-breaker sorting like `wins DESC`) for leaderboard/ranking queries unless the user asks for the full table.
+
+2. Auto-Chart Builder (backend/app/charts/):
+   - Never select a column containing NULLs (`driver_code`) as the category/X-axis when a full name column (`driver_name`, `constructor`, `circuit`, or combined `forename`/`surname`) exists; filter or coalesce any fallback NULL labels cleanly so Plotly never stacks multiple entities under `"None"`.
+   - Pick the Y/value metric intelligently: prefer the column referenced in the SQL `ORDER BY` clause (or matching metric keywords like `percentage`, `rate`, `wins`, `points`, `avg`) rather than blindly grabbing the first numeric column (`total_starts`).
+   - For driver/team ranking bar charts, render a horizontal bar chart (`orientation="h"`, sorted top-to-bottom), cap display to top 12–15 entries, format labels cleanly outside the bars (`textposition="outside"`, e.g. `42.9%` with hover tooltip showing `wins / total_starts`), and avoid vertical text rotation.
+
+3. Add a pytest regression test using the Monza >=5 starts query asserting that:
+   - Juan Manuel Fangio ranks #1 (3 wins / 7 distinct starts = 42.86%), ahead of Juan Pablo Montoya (40.0%) and Alberto Ascari (40.0%).
+   - The generated Plotly JSON uses `driver_name` (no `"None"` labels) and plots `win_percentage` (not `total_starts`).
+
+Run `python -m pytest backend/tests/ -v` to confirm everything passes, then summarize the changes.
+
+---
+
+Fix two UX issues found during Phase 3 live testing sequentially without spawning subagents:
+
+1. Frontend Markdown Rendering (frontend/):
+   - Install `react-markdown` and `remark-gfm` in `frontend/`.
+   - Update the chat message renderer so assistant responses render full GFM Markdown (bold, lists, inline code, tables) with clean dark-HUD Tailwind component overrides (crisp white bold text `#F8FAFC`, compact bullet/list spacing, dark bordered tables, no raw `**` asterisks ever visible).
+
+2. Live Token Streaming & Tighter Engineer Narration (backend/ + frontend/):
+   - Keep the fast `chart` and `trace` SSE frames firing immediately after DuckDB/tool execution (do NOT delay chart rendering).
+   - Emit an immediate status update (`"Data plotted — Engineer analyzing results..."`) right after the chart event, and stream the LLM's final commentary incrementally via SSE `text` delta chunks (using ADK streaming / async chunk yielding) so the chat bubble begins typing right away instead of buffering until completion.
+   - Update the frontend SSE client to append incoming `text` deltas smoothly into the active assistant bubble with a subtle streaming indicator until `done`.
+   - Refine the PitWall Engineer system prompt: when a chart is already plotted, deliver concise, high-signal race-engineer analysis (totals, peaks, trends, key outliers in 2–4 sentences) instead of redundantly listing every single bar/row already visible in the chart; keep authentic F1 radio tone without awkward misused slang like "box this data".
+
+Verify with `python -m pytest backend/tests/ -v` and `npm run build` inside `frontend/`, then summarize the changes.
+
+---
+
+/speckit-implement Execute Phase 4 (User Story 2: Corner-by-Corner Telemetry Comparison, tasks T028–T040) only from specs/001-pitwall-ai/tasks.md sequentially without spawning parallel subagents.
+
+Technical guardrails for FastF1 & Telemetry accuracy:
+1. Coarse-Grained Tool Design: Expose a single coarse-grained ADK tool (`compare_corner_telemetry`) that resolves drivers/circuit/corner, loads cached FastF1 laps (defaulting to Qualifying fastest laps when unspecified), slices ±200m around the corner apex distance, computes all 5 metrics, builds both Plotly figures, and returns structured metrics + chart JSON + trace metadata in ONE tool call (keeping total LLM calls <= 2 per turn).
+2. FastF1 Channel & Interpolation Correctness:
+   - Use `lap.get_telemetry()` so car channels (`Speed`, `Throttle`, `Brake`, `nGear`) and GPS (`X`, `Y`) share aligned `Distance` and `Time`.
+   - Convert `Brake` explicitly to numeric `0`/`100` (FastF1 often returns booleans `True`/`False`, which break `np.interp` or plot awkwardly).
+   - Interpolate both drivers onto an identical 1-meter distance grid across `[max(0, apex_dist - 200), min(lap_len, apex_dist + 200)]`.
+   - Zero the corner time delta at the start of the slice (`(t_B(d) - t_B(d_0)) - (t_A(d) - t_A(d_0))` or distance integration `1/v`), so the delta trace starts cleanly at `0.000s` at corner entry.
+3. Visual Polish & Teammate Collision Handling:
+   - Synchronized 5-panel Plotly chart (`Speed` km/h, `Corner Delta` s, `Throttle` %, `Brake`, `Gear`) sharing a single distance X-axis (`shared_xaxes=True`) with a vertical dashed apex marker line and explicit subtitle (`Year GP | Session | Driver A Lap X vs Driver B Lap Y | Turn N (Nickname)`).
+   - Zoomed GPS Corner Mini-Map: lock equal aspect ratio (`yaxis=dict(scaleanchor="x", scaleratio=1)`), hide axis ticks/grids, and color mini-segments by which driver is faster through each segment, with entry/apex/exit markers.
+   - If comparing two teammates (same official team hex color), automatically distinguish Driver 2 with a dashed line and high-contrast secondary accent color.
+4. Real-Data Verification:
+   - Run pytest including the cached 2024 British GP Qualifying (`VER` vs `NOR` through Copse / Turn 9) fixture test (allow ~30s on first run to populate `./data/fastf1_cache/`).
+   - Run `npm run build` in `frontend/` to confirm the new dual-chart + metadata header + Engineering Trace layout compiles cleanly.
+
+Mark completed Phase 4 tasks as [X] in tasks.md, summarize what was built and verified, and stop for my review before starting Phase 5.
+
+---
+
+I'm confused here:
+otAvailableError: No data for this session! If this session only finished recently, please try again in a few minutes.
+
+---
+
+See this log of backend, I don't understand which account it is asking me for:
+PS D:\Learning\F1_Tracker\f1-race-engineer> python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
+INFO:     Will watch for changes in these directories: ['D:\\Learning\\F1_Tracker\\f1-race-engineer']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [13028] using StatReload
+INFO:     Started server process [%d]
+INFO:     Waiting for application startup.
+INFO:pitwall.main:Starting up PitWall AI backend...
+C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\req.py:251: FutureWarning: `.enable_cache` is deprecated and will be removed in a future version. Use `.configure` instead.
+  warnings.warn("`.enable_cache` is deprecated and will be removed in a "
+INFO:backend.app.data.fastf1_cache:FastF1 cache enabled at D:\Learning\F1_Tracker\f1-race-engineer\data\fastf1_cache
+INFO:pitwall.main:Verified 5 curated SQL views.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:52934 - "POST /api/chat/stream HTTP/1.1" 200 OK
+C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\req.py:251: FutureWarning: `.enable_cache` is deprecated and will be removed in a future version. Use `.configure` instead.
+  warnings.warn("`.enable_cache` is deprecated and will be removed in a "
+INFO:backend.app.data.fastf1_cache:FastF1 cache enabled at D:\Learning\F1_Tracker\f1-race-engineer\data\fastf1_cache
+INFO:backend.app.data.fastf1_cache:FastF1 cache enabled at D:\Learning\F1_Tracker\f1-race-engineer\data\fastf1_cache
+core           INFO     Loading data for British Grand Prix - Qualifying [v3.9.2]
+INFO:fastf1.fastf1.core:Loading data for British Grand Prix - Qualifying [v3.9.2]
+req            INFO     No cached data found for session_info. Loading data...
+INFO:fastf1.fastf1.req:No cached data found for session_info. Loading data...
+_api           INFO     Fetching session info data...
+INFO:fastf1.api:Fetching session info data...
+tokens         INFO     Signing in to Formula 1 account...
+INFO:fastf1.f1account:Signing in to Formula 1 account...
+F1 account email: demo@pitwall.ai
+C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\getpass.py:99: GetPassWarning: Can not control echo on the terminal.
+  return fallback_getpass(prompt, stream)
+Warning: Password input may be echoed.
+F1 account password: REDACTED
+transport    WARNING    Failed to authenticate with Formula 1 account, continuing without authentication: There was a problem with your password or email address. Please check your details and try again.
+WARNING:fastf1.fastf1.internals.f1account.transport:Failed to authenticate with Formula 1 account, continuing without authentication: There was a problem with your password or email address. Please check your details and try again.
+DEBUG:fastf1.fastf1.req:Falling back to https://livetiming-mirror.fastf1.dev/static/2024/2024-07-07_British_Grand_Prix/2024-07-06_Qualifying/SessionInfo.jsonStream
+logger      WARNING     Failed to load session info data!
+WARNING:fastf1.fastf1.core:Failed to load session info data!
+DEBUG:fastf1.fastf1.core:Traceback for failure in session info data
+Traceback (most recent call last):
+  File "C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\logger.py", line 112, in __wrapped
+    return func(*args, **kwargs)
+  File "C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\core.py", line 1457, in _load_session_info
+    self._session_info = api.session_info(self.api_path,
+                         ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+                                          livedata=livedata)
+                                          ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\req.py", line 611, in _cached_api_request
+    data = func(api_path, **func_kwargs)
+  File "C:\Users\shaik\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastf1\_api.py", line 1750, in session_info
+    raise SessionNotAvailableError(
+    ...<2 lines>...
+    )
+fastf1._api.SessionNotAvailableError: No data for this session! If this session only finished recently, please try again in a few minutes.
+req            INFO     No cached data found for driver_info. Loading data...
+INFO:fastf1.fastf1.req:No cached data found for driver_info. Loading data...
+_api           INFO     Fetching driver list...
+INFO:fastf1.api:Fetching driver list...
+tokens         INFO     Signing in to Formula 1 account...
+INFO:fastf1.f1account:Signing in to Formula 1 account...
+F1 account email:
+
+---
+
+Replace FastF1 live network fetches with the free, unauthenticated OpenF1 REST API (`https://api.openf1.org/v1/`) as our primary telemetry provider (sequentially, no subagents), since Formula 1 paywalled FastF1's static archive behind F1TV Access in October 2026:
+
+1. OpenF1 Client + Persistent Disk Cache (`backend/app/data/openf1_client.py`):
+   - Use `httpx` with a local persistent JSON/Parquet cache in `./data/openf1_cache/` and a lightweight rate-limiter (<= 2.5 req/sec, retry with backoff on 429) so cached sessions load instantaneously and never trip OpenF1's 3 req/s, 30 req/min free-tier cap.
+   - Support fetching `sessions`, `drivers`, `laps`, `car_data` (speed, throttle, brake, n_gear, rpm, drs), `location` (x, y, z), `stints`, `position`, and `pit` for any historical session from 2023 onward with zero authentication.
+   - Align `car_data` and `location` by timestamp (`pd.merge_asof` on UTC `date`), compute cumulative `Distance` along the lap by integrating `speed` over `dt` (and normalize to circuit lap length), and keep our existing 1-meter `np.interp` corner-slicing math and `data/corner_nicknames.json` untouched.
+   - Keep official team colors directly from OpenF1's `drivers.team_colour` field (with our existing teammate collision dashed-line / secondary-color handling).
+
+2. Clean Era Boundary & Optional Fallback:
+   - Update the telemetry boundary message (FR-013) to explain that free live car telemetry covers **2023–present** via OpenF1 (while DuckDB covers 1950–2024 historical results/qualifying), unless the user optionally provides FastF1/local cached data for 2018–2022.
+   - Keep the existing `fixture_2024_silverstone_q.json` only as an offline pytest/fallback fixture, NOT as the sole working session.
+
+3. Verification:
+   - Add a pytest integration test verifying real OpenF1 retrieval + caching for a 2024 session (e.g., 2024 British GP Qualifying `VER` vs `NOR` through Copse AND a second circuit like 2024 Belgian GP / Spa or Italian GP / Monza to prove it works dynamically across circuits without any F1 account).
+   - Run `python -m pytest backend/tests/ -v` and confirm all tests pass.
+
+Summarize the changes and stop for my review before Phase 5.
+
+---
+
+Fix four critical bugs exposed during live testing (sequentially, no subagents):
+
+1. Remove Silent Fixture Fallback & Enforce Real OpenF1 Telemetry (`backend/app/data/` & telemetry tools):
+   - NEVER fall back to `fixture_2024_silverstone_q.json` inside production request paths. Keep fixtures strictly inside `backend/tests/` for offline pytest runs only.
+   - Ensure live telemetry uses the free, unauthenticated OpenF1 REST API (`https://api.openf1.org/v1/`) with lazy local disk caching in `./data/openf1_cache/` (filtering `car_data` and `location` by `date>`/`date<` around the target lap, respecting <=2.5 req/s rate limiting).
+   - Enforce the era boundary BEFORE fetching telemetry: if the requested year is `< 2023` (e.g., 2021 Brazil GP), immediately return a clear structured response explaining that car sensor telemetry is available for 2023–present via OpenF1 and offer a lap-by-lap pace comparison from DuckDB (`lap_times`) instead—never substitute a different race or year.
+   - If a 2023+ session or corner fails to load, return an honest error explaining what failed rather than silently plotting Silverstone 2024.
+
+2. Fix Multi-Turn Context & Kill Phantom Default SQL Queries (`backend/app/agent/orchestrator.py` & `backend/app/chat/session.py`):
+   - Inspect why short follow-ups ("Tell me who was faster in all the turns", "What about Suzuka") lost prior turn context and returned unrelated queries (all-time pole positions, 2023 Abu Dhabi Round 22).
+   - Pass the active session's recent turns AND structured last-query entities (`last_year`, `last_circuit`, `last_drivers`, `last_tool`) directly into the ADK agent prompt so follow-ups like "What about Suzuka?" inherit the active drivers/year/comparison type automatically.
+   - Remove any hardcoded/default fallback SQL query (e.g., Abu Dhabi 2023 or all-time poles) that runs when routing fails. If a query asks for something not yet supported or genuinely ambiguous, state that clearly or ask one clarifying question.
+
+3. Fix Circuit/GP Alias Resolution & Zero-Row Self-Correction (`backend/app/data/views.py`, `entity_resolver.py`, SQL tool):
+   - Expose `circuit_country` and `circuit_location` on `v_race_results` and `v_qualifying` so filtering `circuit_country = 'Brazil'` matches both "Brazilian Grand Prix" (pre-2021) and "São Paulo Grand Prix" (2021–2024).
+   - Add a GP/circuit alias map in `entity_resolver.py` (Brazil/Interlagos -> Autódromo José Carlos Pace / Brazil; Suzuka -> Japanese Grand Prix; Monza -> Italian Grand Prix; Imola -> Emilia Romagna; Spa -> Belgian Grand Prix; Silverstone -> British Grand Prix).
+   - If a SQL query returns 0 rows, allow ONE automatic self-correction retry inside the same turn (checking `circuit_country`/`circuit_location` or fuzzy circuit name). Forbid the assistant from ever outputting "Stand by, I'll adjust the query" without actually executing a tool call.
+
+4. Regression Tests (`backend/tests/`):
+   - Test that `Compare Verstappen and Hamilton through Turn 9 at 2021 Brazil GP` returns a 2023 telemetry boundary message (and NEVER mentions Silverstone or 2024).
+   - Test that `Brazil 2021` SQL queries match the 2021 São Paulo Grand Prix and return Hamilton P1 / Verstappen P2 + lap-time stats.
+   - Test a real cached OpenF1 corner comparison on a non-Silverstone heavy-braking corner (e.g., 2024 Italian GP Qualifying Turn 1 / Monza or 2024 Belgian GP Qualifying Turn 1 / La Source) proving dynamic OpenF1 telemetry works end-to-end with real braking/gear traces.
+   - Test multi-turn follow-up resolution ("Compare Verstappen and Norris at Silverstone 2024" -> "What about Suzuka?") verifies Suzuka/Japan is queried rather than Abu Dhabi 2023.
+
+Run `python -m pytest backend/tests/ -v` and summarize the exact root causes found and fixed.
+
+---
+
+/speckit-implement Execute Phase 5 (User Story 3: Full-Lap Telemetry Overlay, tasks T041–T048) only from specs/001-pitwall-ai/tasks.md sequentially without spawning parallel subagents.
+
+Technical guardrails for Phase 5:
+1. Reuse OpenF1 Client + Local Cache (NO FastF1 live calls, NO silent Silverstone fallback):
+   - Fetch full-lap `laps` + `car_data` via `backend/app/data/openf1_client.py` (2023–present). Enforce the strict 2023 boundary if an older year is requested.
+   - Pull sector times (`duration_sector_1`, `duration_sector_2`, `duration_sector_3`), intermediate speeds (`i1_speed`, `i2_speed`), speed trap (`st_speed`), and `lap_duration` directly from OpenF1 `laps` so the engineer commentary and summary strip cite exact official splits.
+   - Ignore `is_pit_out_lap=True` and null `lap_duration` laps when selecting each driver's fastest lap.
+2. Full-Lap Alignment & Coarse-Grained Tool:
+   - Expose a single coarse-grained ADK tool (`compare_full_lap_telemetry`) keeping each turn to <= 2 LLM calls.
+   - Align both drivers' full-lap `car_data` onto a common distance grid (normalized 0 -> 100% or 5-meter intervals across circuit distance) and compute a cumulative lap time delta trace starting at `0.000s` at the start/finish line and matching the exact official `lap_duration` delta at lap end.
+   - Return structured metrics: total lap time & delta, Sector 1/2/3 deltas, top speed / speed-trap delta, % of lap at full throttle (`>= 98%`), and % of lap under braking.
+3. Broadcast-Grade Plotly Visuals:
+   - Synchronized multi-panel dark HUD (`#0B0F17`) chart: **Speed (km/h)**, **Cumulative Time Delta (s)**, **Throttle (%) & Brake**, and **Gear (1–8)** sharing the distance X-axis, with vertical dashed Sector 1 / Sector 2 boundary markers and official driver/team colors (handling teammate color collisions with dashed lines).
+   - Add a clean Sector Delta & Speed Trap summary bar above or beside the chart in the frontend, plus ensure the Engineering Trace drawer shows exact OpenF1 `session_key`, `driver_number`, and `lap_number`.
+4. Verification:
+   - Add pytest tests for full-lap alignment, delta-at-finish accuracy, and a real cached OpenF1 full-lap comparison (e.g., 2024 Italian GP / Monza Qualifying `VER` vs `LEC` or `NOR`).
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+Mark completed Phase 5 tasks as [X] in tasks.md, summarize what was built and verified, and stop for my review before starting Phase 6.
+
+---
+
+Fix three bugs confirmed during Phase 5 live testing sequentially without spawning subagents:
+
+1. SSE Flush & Status Pill UX (`backend/app/chat/streaming.py`, `frontend/`):
+   - Add `Cache-Control: no-cache`, `Connection: keep-alive`, and `X-Accel-Buffering: no` response headers on `/api/chat/stream` (and disable proxy buffering in `frontend/vite.config.ts` if proxying `/api`), ensuring chunks flush immediately without mid-sentence stalls.
+   - Ensure the backend SSE generator always emits a terminal `done` frame inside a `try ... finally` block.
+   - In the frontend, clear the `"Data plotted — Engineer analyzing results..."` status pill as soon as the first `text` chunk arrives (switching to a subtle cursor/typing state until `done`), and always clear loading state in `finally` when the stream closes.
+
+2. Circuit Resolution & Session Cache Isolation ("Canadian GP" returning Monza 2024):
+   - Inspect `backend/app/data/openf1_client.py`, `backend/app/data/entity_resolver.py`, and `backend/app/agent/orchestrator.py`.
+   - Map all GP names/demonyms cleanly to OpenF1's `country_name` / `location` / `circuit_short_name` (e.g., "Canadian GP" / "Canada" -> `Montreal`/`Canada`; "Italian GP" -> `Monza`/`Italy`; "British GP" -> `Silverstone`/`Great Britain`; "Japanese GP" -> `Suzuka`/`Japan`, etc.).
+   - NEVER inherit `last_circuit` from the previous turn when the current user message explicitly mentions a circuit or Grand Prix.
+   - Verify OpenF1 disk cache keys include the exact resolved `session_key` (or `year` + `circuit_short_name` + `session_name`) so Monza and Montreal 2024 Qualifying cannot collide.
+
+3. Grounded Engineer Narration Rules (`backend/app/agent/orchestrator.py`):
+   - Instruct the PitWall Engineer NEVER to claim a driver "secured pole position" or "won the session" from a 2-driver head-to-head telemetry comparison unless the tool output explicitly confirms P1 overall across the full field. Say "edged out [Driver B]" or "set the faster lap of the pair" instead.
+   - Remove misused `"Box this ..."` sign-off phrasing from the system prompt.
+
+4. Regression Tests (`backend/tests/`):
+   - Add a test running 2024 Italian GP Qualifying followed immediately by 2024 Canadian GP Qualifying (`RUS` vs `VER`), asserting two distinct OpenF1 `session_key`s and Montreal's ~`1:12.000` lap times (not Monza's `1:19.440`).
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+Report the exact root cause behind why Montreal resolved to Monza, then summarize the changes.
+
+---
+
+/speckit-implement Execute Phase 6 (Tyre Stint Degradation & Race Pace Strategy) only from specs/001-pitwall-ai/tasks.md sequentially without spawning parallel subagents.
+
+Technical guardrails for Phase 6:
+1. Reuse OpenF1 Client + Local Cache (NO FastF1 live calls, NO hardcoded fixture fallbacks):
+   - Default tyre/stint/race-pace queries to `session_name="Race"` (or `"Sprint"` if requested), enforcing the strict 2023+ OpenF1 boundary for older years.
+   - Fetch `stints`, `laps`, and `pit` from `backend/app/data/openf1_client.py` with the same lazy disk cache keyed by exact `session_key` and rate limiting (<= 2.5 req/s).
+   - Map each lap to its stint (`lap_start <= lap_number <= lap_end`) to attach `compound` and compute exact tyre age (`tyre_age_at_start + (lap_number - lap_start)`).
+
+2. Clean-Lap Outlier Filtering & Degradation Math:
+   - Exclude Lap 1 (standing start), `is_pit_out_lap=True`, pit-in laps (laps where a pit stop occurs or the final lap before a stint transition), null `lap_duration` laps, and Safety Car / VSC / traffic outlier laps (e.g., laps > 107% of that stint's median clean lap time).
+   - Per driver and per stint (with >= 3 clean laps), compute: clean lap count, average clean pace, fastest clean lap, and observed pace slope (`sec/lap` via linear regression over stint lap index; positive = degrading, negative = improving with fuel burn).
+   - Return structured stint summaries + excluded outlier count so the PitWall Engineer narrates grounded strategy numbers without inventing fuel-corrected values or claiming race winners unless confirmed.
+
+3. Coarse-Grained ADK Tool & Pirelli Dark-HUD Visuals:
+   - Expose a single coarse-grained ADK tool (`analyze_tyre_stints`) keeping total LLM calls <= 2 per turn and logging OpenF1 `session_key`, `driver_numbers`, and filtered lap counts in the Engineering Trace drawer.
+   - Render a synchronized dark HUD (`#0B0F17`) Plotly visualization:
+     * Main panel: Clean lap times (scatter points + dashed linear trendline per stint) over Race Lap, with vertical dashed pit-stop markers showing compound switches.
+     * Secondary compact strip (or subplot): Horizontal Stint Timeline showing each driver's compound sequence and stint lengths.
+     * Use official Pirelli compound colors with high contrast on `#0B0F17`: SOFT `#FF3333`, MEDIUM `#FFD700`, HARD `#F0F0F0`, INTERMEDIATE `#39B54A`, WET `#00AEEF`. When comparing 2+ drivers, distinguish drivers clearly via marker shapes/line styles and legend labels (e.g., `LEC — HARD (S2)` vs `PIA — HARD (S3)`).
+
+4. Verification:
+   - Add unit tests for clean-lap outlier filtering (confirming Lap 1, pit in/out, and SC spikes are stripped) and linear degradation slope calculation.
+   - Add a real cached OpenF1 integration test using a classic strategy race (e.g., 2024 Italian GP Race `LEC` vs `PIA` — 1-stop vs 2-stop, or 2024 Bahrain GP Race `VER` vs `SAI`).
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+Mark completed Phase 6 tasks as [X] in tasks.md, summarize what was built and verified, and stop for my review before starting Phase 7.
+
+---
+
+Fix the TypeError in `orchestrator.py:1237` (`format_trace_event() got an unexpected keyword argument 'strategy_params'`) sequentially without spawning subagents:
+
+1. Backend SSE Trace Formatter (`backend/app/chat/streaming.py`):
+   - Inspect `format_trace_event()` and add `strategy_params: dict | None = None` (plus `**extra` pass-through for any additional domain-specific trace keys) so unpacking `**stint_result["trace"]` works cleanly and future Phase 7 trace fields cannot cause the same TypeError.
+   - Include `strategy_params` (and any non-None extra metadata) in the emitted `trace` SSE JSON payload.
+
+2. Frontend Trace Types & Drawer (`frontend/src/types/index.ts` + Engineering Trace component):
+   - Add optional `strategy_params?: Record<string, unknown>` to the trace TypeScript interface and render those fields cleanly in the Engineering Trace drawer (e.g., OpenF1 `session_key`, drivers, clean/outlier lap counts, degradation method) when present.
+
+3. Regression Test (`backend/tests/`):
+   - Add a test calling `format_trace_event(**stint_result["trace"])` (and exercising the tyre-stint branch of `orchestrator.stream_query`) to verify `trace`, `chart`, `text`, and `done` SSE events emit with zero TypeError.
+
+Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`, then summarize the fix.
+
+---
+
+Fix two bugs discovered during Phase 6 live testing sequentially without spawning subagents:
+
+1. Stale / Repeated Tyre Degradation Chart (`backend/app/agent/orchestrator.py`, tyre stint tool, `frontend/`):
+   - Inspect why asking "Show tyre degradation and race pace for Leclerc at Monza 2024" (or any subsequent tyre degradation query) after "Compare Leclerc vs Piastri tyre degradation at 2024 Italian GP" updates the text response but keeps displaying the exact same previous tyre chart.
+   - Fix driver inheritance & single-driver support: when the user explicitly names 1 driver (e.g., Leclerc), run `analyze_tyre_stints` for ONLY `[LEC]`—NEVER carry over a second driver from `last_drivers` unless the current message genuinely omits driver names.
+   - Fix cache key isolation: ensure any in-memory/SQLite/disk chart or response cache keys include the exact normalized `(tool_name, year, session_key/circuit, session_name, tuple(sorted(drivers)))` so different driver subsets or races can never collide and return a previous tyre chart.
+   - Verify the tyre stint branch ALWAYS emits a fresh `chart` SSE event (never silently swallowing chart errors while streaming text).
+   - In the frontend, clear/replace the previous chart state cleanly when a new query runs and give the Plotly `<Plot>` component a unique `key` (or incrementing `revision` + `datarevision` prop) so React/Plotly always tears down old traces and renders the new figure.
+
+2. Hardcoded `VER vs NOR` Metadata Header Above the Chart (`backend/` + `frontend/`):
+   - Inspect the Telemetry & Visual Analytics Stage header strip (where `VER`, `NOR`, `Qualifying (Q3)`, `Full-Lap Overlay`, `Track: DRY` appear) and remove ALL hardcoded `'VER'`, `'NOR'`, `'Qualifying (Q3)'`, `'SOFT'`, and `'Track: DRY'` defaults/placeholders.
+   - Emit a standardized `metadata` object inside every `chart` SSE payload across ALL tool paths (historical SQL, corner telemetry, full-lap overlay, tyre stints):
+     `{ domain, year, grand_prix, session_name, mode_label, drivers: [{ code, name, color, compound? }], track_status? }`.
+   - Render the frontend header strictly from `activeChart.metadata`:
+     * 2+ drivers -> show actual requested driver badges (`LEC vs PIA`, `VER vs SAI`, etc.) with real team/compound colors.
+     * 1 driver -> show a single driver badge (e.g., `LEC`) with NO `vs` separator.
+     * Historical SQL / leaderboard queries (no head-to-head pair) -> hide the driver-vs-driver pills and show the actual historical scope (e.g., `Historical SQL • DuckDB`).
+     * Only display `Track: DRY/WET` or compound tags when the backend actually supplies them.
+
+3. Regression Tests (`backend/tests/` + frontend build):
+   - Add a backend test running two back-to-back tyre queries: (1) `LEC` vs `PIA` at 2024 Italian GP, then (2) solo `LEC` at 2024 Italian GP, then (3) `VER` vs `SAI` at 2024 Bahrain GP. Assert all three emit distinct Plotly figures, query (2) contains ONLY Leclerc traces (no Piastri), and `chart.metadata.drivers` matches the exact requested drivers in each case (never defaulting to `VER`/`NOR`).
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+Report the exact root causes found in both files, then summarize the fixes.
+
+---
+
+Fix a React blank-screen crash that occurs when requesting full-lap telemetry comparisons (regression introduced during the metadata/chart-header refactor), sequentially without spawning subagents:
+
+1. Backend Payload Contract Audit (`backend/app/agent/orchestrator.py`, full-lap tool, `backend/app/chat/streaming.py`):
+   - Inspect the exact `chart` SSE payload emitted by ALL four tool paths: (a) historical SQL, (b) corner telemetry, (c) full-lap telemetry overlay, and (d) tyre stint degradation.
+   - Ensure the **full-lap telemetry** path emits the exact same normalized `chart` envelope and `metadata` schema as the other tools:
+     `metadata: { domain, year, grand_prix, session_name, mode_label, drivers: [{ code, name, color, compound? }], track_status?, sector_summary? }`
+   - Check specifically for mismatches that crash React on full-lap responses (e.g., `drivers` emitted as plain strings `["VER", "NOR"]` instead of objects, `null`/`undefined` nested keys, `plotly_json` vs `figure` key mismatch, or NaN/Infinity values leaking into JSON).
+
+2. Defensive Frontend Rendering & Error Boundary (`frontend/src/`):
+   - Audit every component that reads `activeChart`, `metadata`, `metadata.drivers`, sector delta strips, and `<Plot>` props for full-lap telemetry. Add strict null/type guards (`Array.isArray`, optional chaining, safe defaults) so missing optional fields can NEVER throw a runtime `TypeError`.
+   - Wrap the Telemetry & Visual Analytics Stage in a clean dark-HUD React `ErrorBoundary` component so even if a future chart payload is malformed, the app never blanks out—it displays the error details inside the stage with a reset button while keeping chat usable.
+
+3. Contract & Render Verification:
+   - Add a backend pytest contract test asserting that the `chart` SSE payloads from historical SQL, corner telemetry, **full-lap telemetry**, and tyre stints all pass a shared schema validator (valid JSON with zero `NaN`/`Infinity`, valid `figure.data`/`figure.layout`, and valid `metadata.drivers` object list).
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+   - If Playwright is runnable locally, run a quick headless check (or Vitest/component render test) mounting the Telemetry Stage with a real full-lap payload to verify zero console errors and a rendered Plotly chart.
+
+Report the exact line/mismatch that caused the full-lap blank screen, then summarize the fix.
+
+---
+
+Implement Pass 1 of migrating PitWall AI to a multi-agent Google ADK + A2A architecture sequentially without spawning parallel subagents (keep existing `/api/chat/stream` working until Pass 2):
+
+1. Check Dependencies & Shared Artifact Store (`backend/app/a2a/artifact_store.py`):
+   - Check installed `google-adk` and `a2a-sdk` versions in the active Python environment; install `a2a-sdk` / ADK A2A extras if needed and update `requirements.txt` / `pyproject.toml`.
+   - Create a thread-safe, disk-backed `ArtifactStore` (`./data/artifacts/`) storing heavy payloads (aligned telemetry dataframes, stint tables, SQL result sets, web research sources) keyed by `dataset_id` (UUID) with TTL cleanup. A2A agents MUST pass `dataset_id` + compact summary JSON instead of raw arrays.
+
+2. Universal Circuit Corner Engine (`backend/app/data/circuit_corners.py` + `data/corner_nicknames.json`):
+   - Integrate MultiViewer's circuit geometry API (`https://api.multiviewer.app/api/v1/circuits/{circuit_key}/{year}`) with permanent local disk caching in `./data/openf1_cache/circuits/` so every numbered turn on every modern F1 circuit has exact `(x, y)` coordinates matching OpenF1's `location` stream.
+   - Expand `data/corner_nicknames.json` to cover all 24 modern F1 circuits and iconic nicknames (including Suzuka `130R` -> Turn 15, `Degner`, `Spoon`, `Casio Triangle`, `Silverstone` Copse/Maggotts/Becketts, `Spa` Eau Rouge/Raidillon/Pouhon/Blanchimont, `Monza` Rettifilo/Ascari/Parabolica, `Interlagos` Senna S/Descida do Lago, `Monaco` Sainte Devote/Massenet/Loews/Tabac/Rascasse, etc.).
+   - Normalize circuit keys and match nicknames BEFORE parsing numeric turn numbers so `130R` never parses as Turn 130.
+   - Add a separate `./data/learned_aliases.json` cache (tagged `source="web_verified"`) that maps newly discovered corner nicknames -> verified turn numbers without mutating read-only DuckDB.
+
+3. Build Four A2A Specialist Agents (`backend/app/a2a/agents/`):
+   Use Google ADK + official A2A server utilities (`to_a2a` / `AgentCard` / JSON-RPC task handler) and expose them via a mountable ASGI router (`backend/app/a2a/registry.py`) supporting both single-process sub-path mounts (`/a2a/historical`, `/a2a/telemetry`, `/a2a/research`, `/a2a/viz`) AND env-overridable external URLs:
+   - `historical_agent.py` (`/a2a/historical`): Wraps existing read-only DuckDB SQL tool + alias resolver + 1x zero-row retry; stores full table in `ArtifactStore` and returns compact summary + `dataset_id` + SQL trace.
+   - `telemetry_agent.py` (`/a2a/telemetry`): Wraps existing OpenF1 client, corner compare (now using `circuit_corners.py`), full-lap overlay, and tyre stints; enforces the strict 2023+ telemetry boundary; stores series in `ArtifactStore` and returns verified metrics + `dataset_id` + `session_key`. If a corner nickname is unknown, returns a structured `unknown_corner` hint instead of crashing silently.
+   - `research_agent.py` (`/a2a/research`): Dedicated ADK agent using Gemini's built-in `google_search` grounding tool for off-dataset F1 questions (race incidents, steward penalties, 2025/2026 news) AND resolving unknown corner nicknames to official turn numbers (which can then be verified against MultiViewer and saved to `learned_aliases.json`). Must gracefully return a clear structured "web search unavailable in offline Ollama mode" status when running locally without Gemini API access.
+   - `presentation_agent.py` (`/a2a/viz`): Accepts `{ user_query, dataset_id, domain, summary, display_preferences? }` and outputs a strict Pydantic `VizSpec` rendered deterministically from `ArtifactStore[dataset_id]` into our normalized Plotly `#0B0F17` HUD payload (for telemetry/stints/SQL charts/tables) OR a new `web_intelligence_card` payload (summary bullets + clickable grounded source links, never fake telemetry). Must enforce the standardized `metadata` schema (`domain, year, grand_prix, session_name, mode_label, drivers: [{ code, name, color, compound? }]`).
+
+4. Verification (`backend/tests/test_a2a_specialists.py`):
+   - Mount the A2A ASGI app in FastAPI `TestClient` / `httpx.AsyncClient` and verify:
+     * All 4 `/.well-known/agent-card.json` endpoints return valid A2A Agent Cards.
+     * `TelemetryAgent` resolves Suzuka `130R` cleanly using `circuit_corners.py` and returns a valid `dataset_id`.
+     * `HistoricalSQLAgent` returns verified Brazil 2021 (`São Paulo Grand Prix`) data + `dataset_id`.
+     * `PresentationAgent` produces schema-valid Plotly `chart` payloads from `dataset_id` (for corner, full-lap, tyre stint, and SQL) AND a valid `web_intelligence_card` payload.
+   - Run `python -m pytest backend/tests/ -v`.
+
+Summarize the installed A2A SDK version, Agent Card endpoints, and pytest results, then STOP before modifying `orchestrator.py` (we will do the root orchestrator cutover in Pass 2).
+
+---
+
+how do I test this?
+
+---
+
+I want to test the agents build from frontend
+
+---
+
+undo everything that you've did till now after this request:I want to test the agents build from frontend
+
+---
+
+Let me test them in swagger and get back to you
+
+---
+
+Fix all Pass 1 A2A specialist bugs uncovered during live-data verification (do NOT modify `orchestrator.py` or `/api/chat/stream` yet; run sequentially without spawning subagents):
+
+1. Fix HTTP 500 in `TelemetryAgent` (`compare_corners` & `compare_full_lap`):
+   - Reproduce and fix the unhandled 500 exceptions on:
+     * `POST /a2a/telemetry/compare-corners` with `{"year": 2024, "grand_prix": "Suzuka", "session_type": "Qualifying", "driver_1": "VER", "driver_2": "NOR", "corner": "130R"}`
+     * `POST /a2a/telemetry/compare-lap` with `{"year": 2024, "grand_prix": "Canadian Grand Prix", "session_type": "Qualifying", "driver_1": "RUS", "driver_2": "VER"}`
+   - Audit `ArtifactStore._serialize_data()` so `numpy` scalars/arrays, `pandas` Timestamps/DataFrames, and `NaN`/`Infinity` values convert cleanly to strict JSON (replacing `NaN`/`Inf` with `None`).
+   - Verify `compare_corners` resolves Suzuka `130R` (Turn 15 via `CircuitCornerEngine`), stores the aligned corner dataset in `ArtifactStore`, and returns top-level `{ success: true, dataset_id, summary, metrics, trace }`.
+   - Verify `compare_full_lap` returns Montreal `1:12.000` vs `1:12.000` (`0.000s` delta) + top-level `dataset_id`, and `POST /a2a/viz/render` renders both into schema-valid Plotly figures with `metadata.drivers` set to `[VER, NOR]` and `[RUS, VER]`.
+   - Catch runtime failures cleanly and return structured error JSON (`success: false, error: ...`) instead of raw 500 Internal Server Errors.
+   - Fix the Agent Card description encoding (`2023-present` ASCII hyphen instead of `2023âpresent`).
+
+2. Fix Missing `dataset_id` in `TelemetryAgent.analyze_tyre_stints`:
+   - Inspect `POST /a2a/telemetry/tyre-stints` (both `["LEC", "PIA"]` and solo `["LEC"]` for `2024 Italian Grand Prix Race`).
+   - Ensure `analyze_tyre_stints` stores its stint/lap payload in `ArtifactStore` and returns top-level `dataset_id` (guaranteed distinct for `["LEC", "PIA"]` vs `["LEC"]`), and that `POST /a2a/viz/render` renders the solo `LEC` `dataset_id` into a Plotly figure with ONLY Leclerc traces and `metadata.drivers` containing only `LEC`.
+
+3. Fix `ResearchAgent` Dropping Into `"offline fallback"`:
+   - Inspect `backend/app/a2a/agents/research_agent.py` to find why `POST /a2a/research/query` returned `"Research inquiry processed with offline fallback"` instead of real Gemini Search Grounding.
+   - Check API key resolution (`GEMINI_API_KEY` and `GOOGLE_API_KEY` via `.env` / settings), Gemini model name compatibility with `google_search` grounding, and exception logging (log the exact error if grounding fails instead of hiding it silently).
+   - Ensure online mode returns real grounded facts, source URLs (`[{ title, url }]`), `grounded: true`, and `dataset_id` so `/a2a/viz/render` builds a real `web_intelligence_card`. Only use offline fallback when no API key is present or network is genuinely unreachable.
+
+4. Fix `HistoricalSQLAgent` Alias Rewrite & Natural-Language Input:
+   - Update `_normalize_common_aliases` so `LIKE '%Brazil%'` / `ILIKE '%Brazil%'` / `'Brazilian Grand Prix'` for 2021+ seasons properly resolves to `São Paulo Grand Prix` (or matches `circuit_country = 'Brazil'`), and run 1x automatic 0-row fallback retry before returning. Do NOT store empty 0-row artifacts when a query returns 0 rows.
+   - Support natural-language questions in `HistoricalSQLAgent` (accept `{ "question": "..." }` or plain English in `sql_or_query` / `/a2a/historical`) so the agent generates read-only DuckDB SQL itself using the curated views (`v_race_results`, `v_qualifying`, `v_pit_stops`, `v_driver_standings`), while still allowing direct `sql` execution when explicitly provided.
+
+5. Real-Data Verification:
+   - Add/update tests in `backend/tests/test_a2a_specialists.py` covering all 4 fixes above (including `compare-corners` 130R, `compare-lap` Montreal, `tyre-stints` solo + pair `dataset_id` isolation, `viz/render` for every `dataset_id`, and `LIKE '%Brazil%'`).
+   - Run `python -m pytest backend/tests/ -v`.
+
+Report the exact root cause of both HTTP 500s, the missing tyre-stint `dataset_id`, and the research offline fallback, then summarize the test results.
+
+---
+
+Fix the final 2 Pass 1 live-test failures and 2 payload mismatches sequentially without spawning subagents (do NOT modify `orchestrator.py` or `/api/chat/stream` yet):
+
+1. Fix Table-Alias Corruption in `HistoricalSQLAgent._normalize_common_aliases` (`backend/app/a2a/agents/historical_agent.py`):
+   - Live NL test failed with DuckDB `Parser Error` at:
+     `AND (lower(w1.(lower(grand_prix) LIKE '%brazil%' OR lower(grand_prix)...`
+   - Fix the alias-rewrite regex so it captures an optional table qualifier (`(?:(?P<alias>\w+)\.)?grand_prix`) and wraps the entire `lower(<alias>grand_prix) LIKE ...` expression cleanly instead of injecting parentheses after `w1.`.
+   - Also check `lower(...)` wrapping so `lower(w1.grand_prix) LIKE '%brazil%'` is replaced as a whole predicate without nested `lower(w1.(lower(...)))`.
+   - Add a unit test asserting both unqualified (`grand_prix LIKE '%Brazil%'`) and table-aliased (`lower(w1.grand_prix) LIKE '%brazil%'`) SQL rewrite into valid executable DuckDB SQL.
+
+2. Fix `ResearchAgent` Silent `"offline fallback"` (`backend/app/a2a/agents/research_agent.py`):
+   - Diagnose the exact exception causing `POST /a2a/research/query` to return `grounded=False` and `"Research inquiry processed with offline fallback"`.
+   - Inspect how `.env` / `GEMINI_API_KEY` / `GOOGLE_API_KEY` is loaded, which Gemini model is being called for Search Grounding, and the exact `google-genai` SDK syntax used for `GoogleSearch` (`types.Tool(google_search=types.GoogleSearch())`).
+   - Log the exact exception with `logger.exception(...)` whenever grounding fails, and if the configured default model doesn't support `google_search` grounding, fall back to a grounding-compatible Gemini Flash model before giving up to offline mode.
+   - Verify with a live call to `research_topic("What happened between Verstappen and Hamilton at Turn 4 during the 2021 Brazilian GP?")` that `grounded=True` and real `sources` URLs are returned.
+
+3. Unify `PresentationAgent` Response Schema (`backend/app/a2a/agents/presentation_agent.py`):
+   - Ensure `POST /a2a/viz/render` returns a consistent top-level contract across ALL domains:
+     * For `historical_sql`, `corner_telemetry`, `full_lap`, and `tyre_stints`: ALWAYS include top-level `figure` (`{"data": [...], "layout": {...}}`), `viz_type`, and `metadata`.
+     * For `research`: ALWAYS include top-level `viz_type: "web_intelligence_card"` and `web_intelligence_card: { title, summary, bullets, sources: [{ title, url }], grounded }` (never an empty Plotly figure).
+
+4. Populate `Apex speeds` in `TelemetryAgent.compare_corners` Summary (`backend/app/a2a/agents/telemetry_agent.py`):
+   - Live test returned `Apex speeds: {}` in the summary string for 2024 Suzuka `130R`. Read the actual apex speed keys returned by `compare_corner_telemetry` so the summary reports real `VER` and `NOR` km/h figures.
+
+Run `python -m pytest backend/tests/ -v` and report the exact reason `ResearchAgent` was hitting offline fallback plus test results.
+
+---
+
+Execute Pass 2 of the Google ADK + A2A migration sequentially without spawning parallel subagents: cut over `backend/app/agent/orchestrator.py` and the React frontend from the legacy `if/elif` router to the 4 verified Pass 1 A2A specialist agents.
+
+1. Build Async A2A Client (`backend/app/a2a/client.py`):
+   - Implement a lightweight async `A2AClient` using `httpx.AsyncClient` that discovers the 4 mounted specialists via their `/.well-known/agent-card.json` endpoints (base URL configurable via env vars, defaulting to the local server or FastAPI ASGI transport so single-process local dev and Cloud Run never deadlock on self-calls).
+   - Call the exact Pass 1 verified endpoints:
+     * Historical: `POST /a2a/historical/query` (passing `question` for natural-language SQL generation + alias normalization)
+     * Telemetry: `POST /a2a/telemetry/compare-corners`, `/a2a/telemetry/compare-lap`, `/a2a/telemetry/tyre-stints`
+     * Research: `POST /a2a/research/query` (and `resolve_and_learn_corner` when an unknown corner nickname is encountered)
+     * Presentation: `POST /a2a/viz/render` (passing `dataset_id`, `user_query`, `domain`, and optional `display_preferences`)
+   - Record every A2A hop (`agent_name`, `endpoint`, `duration_ms`, `dataset_id`, `status`) so the orchestrator can stream the live A2A hop trace to the frontend.
+
+2. Cut Over `backend/app/agent/orchestrator.py` (Delete Legacy `if/elif` Router):
+   - Remove the legacy hardcoded `if/elif` intent-routing branches and direct local data-tool execution from `orchestrator.py`.
+   - Wire the root `PitWallEngineer` Google ADK agent (`LlmAgent` with Gemini, preserving offline Ollama `qwen3.5:4b` compatibility) with clean A2A delegation tools backed by `A2AClient` so the LLM routes intent to the right specialist(s) instead of regex/if-else branching.
+   - Maintain multi-turn session state (`last_year`, `last_circuit`, `last_drivers`, `last_session`): inherit ONLY omitted fields on follow-ups (e.g., "Now zoom into Parabolica", "just Leclerc")—NEVER override explicitly named drivers, circuits, or years.
+   - Self-healing unknown corner loop: if `TelemetryAgent` returns an unknown-corner error for a 2023+ session, delegate to `ResearchAgent` (`resolve_and_learn_corner`) over A2A to verify the turn number against MultiViewer geometry, persist to `learned_aliases.json`, and retry `TelemetryAgent` once cleanly.
+   - Always pass any non-null `dataset_id` from `Historical`, `Telemetry`, or `Research` to `PresentationAgent` (`/a2a/viz/render`) to produce the normalized visual payload (`figure` + `metadata` OR `web_intelligence_card`).
+   - Enforce strict SSE event ordering inside `try ... except ... finally`:
+     `status` -> `trace` (including `a2a_hops`, `dataset_id`, SQL / OpenF1 `session_key`, grounding sources) -> `chart` or `web_card` -> streamed `text` (concise, grounded PitWall radio narration using ONLY verified metrics from the specialist summaries) -> guaranteed `done`.
+   - Zero silent errors: any era-boundary refusal (`< 2023` telemetry), unrecognized corner after retry, or specialist error MUST yield a clear user-facing `error` or `text` SSE message before `done`.
+
+3. Update React Frontend (`frontend/src/`):
+   - Handle `web_intelligence_card` payloads in the Telemetry & Visual Analytics Stage: render a dark `#0B0F17` HUD "Web Intelligence & Grounded Sources" card with the summary, bullet points, clickable source links, and `"Google Search Grounding"` badge—never mounting Plotly when `viz_type === "web_intelligence_card"`.
+   - Update the Engineering Trace drawer to display the live **A2A Hop Trace** (e.g., `PitWallEngineer -> TelemetryAgent -> PresentationAgent` with latency ms and `dataset_id`), alongside SQL / OpenF1 `session_key` / grounding sources.
+   - Ensure `error` SSE events (or streams closing with empty assistant text) render a styled inline PitWall warning bubble in the chat timeline instead of disappearing silently, and clear the loading status pill as soon as the first text token or error arrives.
+
+4. End-to-End Verification (`backend/tests/test_a2a_orchestrator_e2e.py` + frontend build):
+   - Test `POST /api/chat/stream` end-to-end across all 4 A2A specialists:
+     1. Corner telemetry (`130R` at 2024 Suzuka Qualifying `VER` vs `NOR`) -> asserts `a2a_hops` includes `telemetry` + `viz`, real apex speeds, valid `figure` and `metadata.drivers`.
+     2. Full-lap telemetry (`RUS` vs `VER` 2024 Canadian GP Qualifying) -> asserts valid `figure`, zero `NaN`, and `metadata.drivers == [RUS, VER]`.
+     3. Tyre stints (`LEC` vs `PIA` 2024 Italian GP Race, then follow-up solo `LEC`) -> asserts distinct `dataset_id`s and solo `LEC` contains zero `PIA` traces.
+     4. Historical SQL (`Who won the 2021 Brazilian Grand Prix and what was the winning margin over P2?`) -> asserts `historical` + `viz` hops and valid `figure`.
+     5. Web research (`2021 Brazilian GP Turn 4 incident`) -> asserts `research` + `viz` hops and `web_intelligence_card` payload with clickable sources.
+     6. Era refusal (`2021 Brazil telemetry`) & invalid corner (`Turn 99 Suzuka`) -> asserts non-empty user-facing message before `done`.
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+Report which legacy routing blocks were removed from `orchestrator.py`, confirm how self-calls avoid ASGI/HTTP deadlocks, and summarize pytest + frontend build results.
+
+---
+
+Follow our `.specify` spec-driven workflow strictly (update the active spec/plan/tasks inside `.specify/` FIRST, then implement sequentially without spawning parallel subagents):
+
+### Spec Additions to Record in `.specify/` Before Coding
+1. **Model & Latency Policy (`gemini-4-hydrogen`):**
+   - Upgrade all backend Gemini callers (`PitWallEngineer`, `HistoricalSQLAgent`, `TelemetryAgent`, `ResearchAgent`, `PresentationAgent`) from legacy Flash models to `gemini-4-hydrogen` (configurable via env var `GEMINI_MODEL=gemini-4-hydrogen`, while keeping Ollama `qwen3.5:4b` offline fallback intact).
+   - Upgrade `google-genai>=2.34.0` in `requirements.txt` / venv.
+   - Configure explicit `thinking_config=types.ThinkingConfig(thinking_level=...)` per specialist:
+     * `HistoricalSQLAgent` SQL generation: `LOW` (fallback to `MEDIUM` only on 0-row/syntax retry)
+     * `PitWallEngineer` intent routing & radio narration: `LOW`
+     * `ResearchAgent` (`google_search` grounding): `LOW`
+   - Remove deprecated/ignored Gemini 3 params (`temperature`, `top_p`, `top_k`, low `max_output_tokens` caps, `"minimal"` thinking level) from Gemini 4 calls.
+
+2. **Single-Row / Scalar SQL Visual Contract (`PresentationAgent` + React HUD):**
+   - Never mount an empty Plotly `data: []` canvas (blank `-1..6` grid).
+   - Never put raw specialist tool summaries (`"Retrieved X rows across columns..."`, `"Dataset stored under dataset_id=..."`) into Plotly `layout.title` or user-facing chat `text`.
+   - When `historical_sql` returns `row_count == 1` (e.g., winner + winning margin, single record lookup):
+     * `PresentationAgent` returns `viz_type: "kpi_card"` with a clean human `title` (derived from `user_query` or `chart_title`), structured `metrics: [{ label, value }]`, and the single record formatted cleanly (e.g., `Winner: Lewis Hamilton`, `Constructor: Mercedes`, `Grid: P10`, `Winning Margin: +10.496s`).
+     * React `ChartStage` renders a dark `#0B0F17` HUD **Telemetry / Race Result KPI Card** for `viz_type === "kpi_card"`.
+   - When `historical_sql` returns `row_count >= 2` and no numeric y-axis bar chart is sensible, render a dark HUD data table (`viz_type: "data_table"`) instead of an empty Plotly chart.
+
+3. **SSE `viz_type` & Faster-Driver Attribution Polish:**
+   - Ensure `viz_type` (`corner_telemetry`, `full_lap`, `tyre_stints`, `historical_sql`, `kpi_card`, `data_table`, `web_intelligence_card`) is always preserved at the top level of the SSE `chart` event so `WebIntelligenceCard` and `KpiCard` mount reliably.
+   - Ensure `compare_full_lap` explicitly emits `driver_1_lap_time`, `driver_2_lap_time`, and `faster_driver` so `PitWallEngineer` cannot invert who set the faster lap (e.g., Montreal 2024 Qualifying `RUS` vs `VER`).
+
+### Implementation & Verification
+- Update `.specify/` artifacts first, then implement backend + frontend changes.
+- Verify with `python -m pytest backend/tests/ -v` (add a test asserting 1-row Brazil 2021 SQL returns `viz_type == "kpi_card"` with zero raw `dataset_id` text in title/chat, and a test verifying `gemini-4-hydrogen` `ThinkingConfig(thinking_level="LOW")` config).
+- Run `npm run build` in `frontend/`.
+- Report updated `.specify/` files, before/after latency on `HistoricalSQLAgent`, and test/build status.
+
+---
+
+Wait, I've few changes to do. please undo the changes you made for the last prompt. I'm preparing one new prompt for you.
+
+---
+
+Follow our `.specify` spec-driven workflow strictly: update the active spec, plan, and tasks in `.specify/` FIRST, then implement sequentially without spawning parallel subagents. Do NOT add new external providers or change the configured Gemini API model name in `.env`.
+
+### 1. Fix Blank 1-Row SQL Plot & Raw Text Leaks (`PresentationAgent` + `orchestrator.py` + React HUD)
+- **Zero blank Plotly grids:** Never emit an empty Plotly `data: []` figure (the `-1..6` / `-1..4` blank axes seen on 1-row historical lookups).
+- **Clean titles & chat text:** Never pass raw specialist summary strings (`"Retrieved X rows across columns..."`, `"Dataset stored under dataset_id=..."`) into Plotly `layout.title` or user-facing chat `text`. Keep `dataset_id` strictly inside the `trace` event.
+- **1-row KPI Card (`viz_type: "kpi_card"`):** When `historical_sql` returns `row_count == 1` (e.g., race winner + winning margin), `PresentationAgent` MUST return:
+  `{ viz_type: "kpi_card", title: "<clean human title>", kpi_card: { subtitle: "<race/year>", metrics: [{ label, value }] } }`
+  and `ChartStage` MUST render a dark `#0B0F17` HUD Result KPI Card for `viz_type === "kpi_card"`.
+- **Multi-row table fallback (`viz_type: "data_table"`):** If `historical_sql` returns `>= 2` rows with no suitable numeric y-axis bar chart, return a structured dark HUD data table instead of an empty Plotly plot.
+
+### 2. Preserve Top-Level `viz_type` on SSE `chart` Events (`orchestrator.py` + `frontend/src/`)
+- Ensure every SSE `chart` payload includes top-level `viz_type` (`"corner_telemetry"`, `"full_lap"`, `"tyre_stints"`, `"historical_sql"`, `"kpi_card"`, `"data_table"`, `"web_intelligence_card"`) alongside `figure`, `kpi_card`, `data_table`, or `web_intelligence_card`.
+- Confirm React `ChartStage` switches cleanly on `viz_type` so `WebIntelligenceCard` mounts for research queries and `KpiCard` mounts for 1-row SQL queries without ever mounting an empty `<Plot>`.
+
+### 3. Trim the 8-Second `HistoricalSQLAgent` Thinking Delay (Keep Current `.env` Model)
+- Keep the existing `GEMINI_MODEL` configured in `.env`.
+- Disable or set minimal thinking (`thinking_budget=0` for Gemini 2.5 Flash models, or the lowest supported `thinking_level` for the configured model—guarded so unsupported models ignore it cleanly) on `HistoricalSQLAgent` SQL generation and `PitWallEngineer` narration so simple lookups drop from ~8s to ~1–2s.
+
+### 4. Fix Full-Lap Faster-Driver Attribution (`telemetry_agent.py` + `orchestrator.py`)
+- In `compare_full_lap`, include explicit `driver_1_lap_time`, `driver_2_lap_time`, and `faster_driver` fields in the specialist summary so `PitWallEngineer` never inverts who set the faster lap (e.g., 2024 Canadian GP Qualifying `RUS` vs `VER`).
+
+### 5. Verification
+- Add/update tests in `backend/tests/` verifying:
+  * 2021 Brazilian GP 1-row query returns `viz_type == "kpi_card"` with zero `"Dataset stored under"` / `"Retrieved 1 rows"` text in title or chat `text`.
+  * Web research SSE `chart` event preserves `viz_type == "web_intelligence_card"`.
+  * Full-lap summary explicitly names the faster driver matching the lower lap time.
+- Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+- Report the updated `.specify/` files, before/after latency on `HistoricalSQLAgent`, and test/build output.
+
+---
+
+Follow our `.specify` spec-driven workflow (update `.specify/` spec, plan, and tasks FIRST, then implement sequentially without spawning parallel subagents):
+
+1. Unified Gemini -> Local Ollama Runtime Failover (`backend/app/llm/` shared helper used by `PitWallEngineer`, `HistoricalSQLAgent`, and `ResearchAgent`):
+   - Keep Gemini configuration purely env-driven (`GEMINI_API_KEY`, `GEMINI_MODEL`, and optional `GOOGLE_GENAI_USE_VERTEXAI` / `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION`) so switching to billed GCP credits later requires zero code changes.
+   - Trigger automatic failover to local Ollama (`OLLAMA_BASE_URL`, default `http://localhost:11434/api/chat`; `OLLAMA_MODEL`, default `qwen3.5:4b`) on ANY runtime Gemini failure—specifically `429` / `RESOURCE_EXHAUSTED`, `503`, timeouts, or missing key.
+   - Log the full Gemini exception server-side (`logger.warning`), never leak raw exception dicts or tracebacks into UI summaries, bullets, or chat text.
+   - Include `"provider": "gemini" | "ollama_fallback" | "cache"` in the SSE `trace` event so the Engineering Trace drawer shows when failover occurred.
+
+2. Upgrade `ResearchAgent` & `WebIntelligenceCard.tsx`:
+   - Execution order:
+     1) Disk Cache (`./data/research_cache/`): return cached `grounded=True` responses immediately (0 API quota spent).
+     2) Gemini + `google_search` grounding: save successful grounded responses to `./data/research_cache/`.
+     3) Local Ollama Fallback: on `429` or network error, prompt `qwen3.5:4b` for a concise F1 summary and clean bullet takeaways (`grounded: false`, `provider: "ollama_fallback"`, `sources: []`).
+     4) Clean fallback notice only if Ollama is also unreachable.
+   - Strip empty/whitespace strings from `bullets` (fixes the blank `- ` first bullet).
+   - In `WebIntelligenceCard.tsx`, show `"Google Search Grounding"` only when `grounded === true`, and `"Local Ollama Fallback (Offline Model)"` when `grounded === false` (never `"Offline Verified Knowledge"`).
+
+3. Protect Quota During `pytest`:
+   - Mock live Gemini `google_search` calls by default in `backend/tests/` unless `RUN_LIVE_GROUNDING=1` is set.
+   - Add unit tests verifying:
+     * Gemini `429 RESOURCE_EXHAUSTED` automatically invokes local Ollama and returns clean non-empty bullets with zero raw error JSON.
+     * Second identical research query hits `./data/research_cache/` with 0 live API calls.
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+---
+
+Fix the local Ollama failover timeouts, payload config, and empty HUD bullets using the exact line findings from our backend scan (update `.specify/` if needed, run sequentially without subagents):
+
+1. Switch Ollama Defaults to IPv4 (`backend/app/config.py` lines 40-41):
+   - Change `OLLAMA_API_BASE` default to `"http://127.0.0.1:11434"` and `OLLAMA_BASE_URL` default to `"http://127.0.0.1:11434/api/chat"` to prevent Windows IPv6 `localhost` delays.
+
+2. Fix Ollama Payloads & Timeouts (`backend/app/llm/failover_client.py`):
+   - In `_call_ollama_sync` (lines 234-252) and streaming fallback (lines 336, 403-407):
+     * Increase default `timeout` / `ollama_timeout` from `15.0`/`20.0` to `90.0` (using `httpx.Timeout(90.0, connect=5.0)`).
+     * Add `"think": False` and `"keep_alive": "15m"` to both sync and streaming `/api/chat` JSON payloads so `qwen3.5:4b` does not stall in thinking mode and stays warm in VRAM between turns.
+     * Normalize `get_ollama_chat_url()` so `/api/chat` is never duplicated.
+
+3. Raise Caller & A2A Hop Timeouts:
+   - `backend/app/a2a/agents/research_agent.py` (line 149): bump `ollama_timeout` from `20.0` to `90.0`.
+   - `backend/app/a2a/agents/historical_agent.py` (line 112): bump `ollama_timeout` from `15.0` to `90.0`.
+   - `backend/app/agent/orchestrator.py`: bump `_check_ollama_available` probe timeout (line 288) from `0.25` to `1.5` (connecting to `127.0.0.1`), and bump `_call_ollama` / `_stream_ollama_commentary` timeouts (lines 380, 402) from `5.0` to `90.0`.
+   - `backend/app/a2a/client.py` (lines 97, 103): bump `timeout` from `60.0` to `120.0` so A2A hops never time out while a specialist waits on a cold Ollama load.
+
+4. Fix Blank `- ` Bullets on `WebIntelligenceCard`:
+   - In `research_agent.py`, `presentation_agent.py`, and `frontend/src/components/ChartStage/WebIntelligenceCard.tsx`, strip leading `-`/`•`/`*` prefixes and filter out empty/whitespace strings before rendering `bullets` so stray blank `- ` rows never appear.
+
+5. Verify:
+   - Add/update unit tests checking `"think": False`, `"keep_alive": "15m"`, `90.0s` Ollama timeouts, and empty-bullet filtering.
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+---
+
+Fix the local Ollama CPU timeout, 429 retry waste, and duplicate bullet formatting (run sequentially, no subagents):
+
+1. Cap Context & Token Generation in `backend/app/llm/failover_client.py`:
+   - `ollama ps` confirmed `qwen3.5:4b` is spilling 97% onto CPU at 4096 context and blowing past the 90s read timeout on uncapped outputs.
+   - In BOTH `_call_ollama_sync` and the streaming Ollama fallback (`stream_with_failover`), add `"options"` to the `/api/chat` JSON payload:
+     ```python
+     "options": {
+         "num_ctx": 1024,
+         "num_predict": 180,
+         "temperature": 0.3,
+     }
+     ```
+     (Shrinking `num_ctx` from 4096 to 1024 reduces VRAM KV-cache overhead and speeds up CPU prefill; capping `num_predict` to 180 keeps fallback completions well under 45–60s even on CPU.)
+   - Bump default `timeout` / `ollama_timeout` from `90.0` to `150.0` (`httpx.Timeout(150.0, connect=5.0)`), and bump `backend/app/a2a/client.py` hop timeout to `180.0` so A2A never aborts before Ollama finishes.
+   - Log exact elapsed seconds and exception type on Ollama failure:
+     `logger.warning("Local Ollama fallback unavailable (%s) after %.1fs [%s]: %s", chat_url, elapsed, type(ollama_exc).__name__, ollama_exc)`
+
+2. Add a 60-Second Gemini `429` Cooldown in `backend/app/llm/failover_client.py`:
+   - When Gemini throws `429 RESOURCE_EXHAUSTED`, record the failure timestamp and skip redundant Gemini calls for 60 seconds (routing straight to local Ollama during that window instead of hitting `429` twice per user turn).
+
+3. Update `backend/app/a2a/agents/research_agent.py`:
+   - Pass `ollama_timeout=150.0` to `generate_with_failover` (line 149).
+   - Keep the fallback prompt concise (1–2 short sentences + 2–3 brief bullets, max ~120 words) so it fits cleanly within `num_predict=180`.
+
+4. Fix Alternating Blank `- ` Bullets in `WebIntelligenceCard`:
+   - Inspect `research_agent.py`, `presentation_agent.py`, and `frontend/src/components/ChartStage/WebIntelligenceCard.tsx` to fix why every bullet rendered as a blank `- ` line above the actual bullet (`- \n- Live web grounding...`). Ensure `bullets` are stripped of leading `-`/`*`/`•` characters, empty strings are dropped, and `WebIntelligenceCard.tsx` renders each bullet inline without double markers or block-level breaks after the dash.
+
+5. Verify:
+   - Update unit tests to assert `"options": {"num_ctx": 1024, "num_predict": 180, ...}`, `150.0s` Ollama timeout, 60s `429` cooldown behavior, and clean bullet rendering.
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+---
+
+Follow our `.specify` spec-driven workflow (update `.specify/` spec, plan, and tasks FIRST, then implement sequentially without spawning parallel subagents):
+
+Redesign the React frontend (`frontend/src/`) from the 2-column split screen into a sleek, ChatGPT/Gemini-style single-column centered conversational HUD while preserving the `#0B0F17` F1 PitWall dark theme and all existing SSE/A2A functionality:
+
+1. Remove Split-Screen & Persistent Sidebar Prompts:
+   - Delete the 2-column split layout and remove the static vertical list of 11 recommendation buttons that currently sits inside the chat pane.
+   - Keep the slim top header bar (`F1 PITWALL AI`, `DUCKDB` / `FASTF1` status pills) and add a `+ New Session` button to reset the thread cleanly.
+
+2. Empty-State Welcome View & Quick-Prompt Popover:
+   - When `messages.length === 0`, display a centered PitWall AI hero header with 4 concise starter prompt cards (2x2 grid: 1 Corner Telemetry, 1 Full-Lap, 1 Tyre Stints, 1 Historical/Research). Hide this welcome screen immediately once the first message is sent.
+   - Add a small compact `Prompts` / lightning-bolt popover button inside the floating bottom input bar so demo prompts remain 1-click accessible without consuming screen space.
+
+3. Per-Turn Inline Feed (`max-w-5xl` centered, Chart/Card on Top -> Text Below):
+   - Refactor `useSSEStream.ts` and message state so each assistant message owns its own `chart` / `vizPayload` (`figure`, `kpi_card`, `data_table`, `web_intelligence_card`) and `trace` object instead of overwriting a single global right-panel state.
+   - Render each assistant turn vertically in this exact order:
+     1) **Live Status Pill** (while streaming, auto-hides once content arrives).
+     2) **Visual Artifact on Top:** Full-width interactive Plotly chart (`useResizeHandler={true}`, responsive width, driver badges, plus a modal/fullscreen expand toggle), dark HUD `KpiCard`, `DataTable`, or `WebIntelligenceCard`.
+     3) **Race Engineer Text Below:** Clean, readable markdown/prose commentary directly beneath the visual artifact.
+     4) **Collapsible Engineering Trace Bar:** Compact single-line toggle at the bottom of the turn displaying A2A hops, provider (`gemini` / `ollama_fallback` / `cache`), and latency; clicking expands the full `TraceDrawer` (A2A hop breadcrumbs, `dataset_id`, SQL, and grounding sources).
+
+4. Floating Bottom Composer Bar:
+   - Replace the sidebar input with a centered floating dark pill composer pinned to the bottom (`max-w-3xl`), containing: compact Quick-Prompts popover button, auto-growing textarea, placeholder slot ready for the upcoming Voice Pit-Wall Radio mic button, and Send button.
+   - Auto-scroll smoothly to the newest turn while keeping earlier charts/cards scrollable in history.
+
+5. Verify:
+   - Ensure `npm run build` in `frontend/` succeeds with zero TypeScript/Vite errors and no backend SSE contract changes are broken.
+
+---
+
+Follow our `.specify` spec-driven workflow (update `.specify/` spec, plan, and tasks FIRST, then implement sequentially without spawning parallel subagents):
+
+Upgrade `backend/app/llm/failover_client.py` and `backend/app/config.py` to a 4-tier cascading failover chain (Gemini -> Groq -> OpenRouter -> Local Ollama):
+
+1. Configuration (`backend/app/config.py`):
+   - Add env-driven settings:
+     * `APP_ENV: str = Field(default="local")` (`"local"` | `"production"`)
+     * `ENABLE_OLLAMA_FALLBACK: Optional[bool] = Field(default=None)` (defaults to `True` when `APP_ENV != "production"`, `False` when `APP_ENV == "production"`)
+     * `GROQ_API_KEY: Optional[str] = Field(default=None)`
+     * `GROQ_BASE_URL: str = Field(default="https://api.groq.com/openai/v1")`
+     * `GROQ_MODEL: str = Field(default="openai/gpt-oss-120b")`
+     * `OPENROUTER_API_KEY: Optional[str] = Field(default=None)`
+     * `OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1")`
+     * `OPENROUTER_MODEL: str = Field(default="openrouter/free")`
+
+2. Unified OpenAI-Compatible Cloud Failover & Per-Provider Circuit Breakers (`backend/app/llm/failover_client.py`):
+   - Maintain independent 60-second `429` cooldown timers for `"gemini"`, `"groq"`, and `"openrouter"` so rate-limited providers are skipped immediately without wasted round-trips.
+   - Update BOTH `generate_with_failover` and `stream_with_failover` to execute strictly in order:
+     1) **Gemini** (primary, supports `google_search` grounding when requested) -> `provider="gemini"`
+     2) **Groq** (`POST {GROQ_BASE_URL}/chat/completions`, `timeout=30.0`, trimmed context for 8K TPM budget) when `GROQ_API_KEY` is set and not on cooldown -> `provider="groq_fallback"`
+     3) **OpenRouter** (`POST {OPENROUTER_BASE_URL}/chat/completions`, `timeout=35.0`, optional `HTTP-Referer` & `X-Title: PitWall AI` headers) when `OPENROUTER_API_KEY` is set and not on cooldown -> `provider="openrouter_fallback"`
+     4) **Local Ollama** (`qwen3.5:4b`, `num_ctx: 1024`, `num_predict: 180`, `think: False`, `timeout=150.0`) ONLY when `ENABLE_OLLAMA_FALLBACK` resolves to `True` -> `provider="ollama_fallback"`
+   - Log provider errors server-side via `logger.warning`, never leak raw JSON/429 payloads into UI bullets or chat text.
+
+3. UI Attribution (`presentation_agent.py` + `WebIntelligenceCard.tsx` + `TraceDrawer`):
+   - Display clean, honest provider labels in the Engineering Trace drawer and `WebIntelligenceCard` badge for `"gemini"` (`Google Search Grounding`), `"cache"` (`Cached Search Grounding`), `"groq_fallback"` (`Groq Cloud Fallback — No Live Search`), `"openrouter_fallback"` (`OpenRouter Free Fallback — No Live Search`), and `"ollama_fallback"` (`Local Ollama Fallback — Offline Model`).
+
+4. Verify:
+   - Add unit tests in `backend/tests/` mocking the full cascade:
+     * Gemini `429` -> Groq `200` (`provider == "groq_fallback"`)
+     * Gemini `429` + Groq `429` -> OpenRouter `200` (`provider == "openrouter_fallback"`)
+     * All cloud providers fail in `APP_ENV=local` -> Ollama runs
+     * All cloud providers fail in `APP_ENV=production` -> Ollama is skipped cleanly without probing `127.0.0.1:11434`
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+---
+
+where should I keep the API keys, and with what names?
+
+---
+
+do I really need to add this as well: OPENROUTER_HTTP_REFERER, gemini gcp key's I'll add later for now I gave you a key and a model to use. For grok and openrouter I've added api key, base url and model. For ollama I've added base and model name. Let me know if you need anything more now
+
+---
+
+alright let me test and get back to you
+
+---
+
+There's just one flaw here, when a new text is being generated the screen should be automatically going down right but, it's not going like that
+
+---
+
+Follow our `.specify` spec-driven workflow (update `.specify/` spec, plan, and tasks FIRST, then implement sequentially without spawning parallel subagents):
+
+Prepare PitWall AI for scalable $0 cloud deployment (Vercel/Cloudflare Pages frontend + containerized FastAPI backend targeting Hugging Face Spaces Docker now and GCP Cloud Run later), keeping embedded read-only DuckDB as the historical analytics engine:
+
+1. Production Config, CORS & SSE Proxy Safety (`backend/app/config.py`, `backend/app/main.py`, `backend/app/chat/router.py`):
+   - Add env settings:
+     * `CORS_ORIGINS: str = Field(default="http://localhost:5173,http://127.0.0.1:5173")` (comma-separated allowed origins)
+     * `CACHE_DIR: str = Field(default="")` (resolve to `./data` when `APP_ENV != "production"` and `/tmp/pitwall_cache` when `APP_ENV == "production"`)
+     * `REDIS_URL: Optional[str] = Field(default=None)` (optional Upstash Redis TLS/REST URL)
+     * `RATE_LIMIT_PER_MIN: int = Field(default=15)`
+   - Ensure `ENABLE_OLLAMA_FALLBACK` defaults to `False` when `APP_ENV == "production"` so the container never probes `127.0.0.1:11434`.
+   - Configure FastAPI `CORSMiddleware` from `CORS_ORIGINS`.
+   - Add SSE anti-buffering headers (`Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`) to `POST /api/chat/stream`.
+   - Ensure `GET /health` returns HTTP 200 with `{ "status": "ok", "env": ..., "duckdb_ready": bool, "fastf1_cache_dir": ..., "active_providers": [...] }`.
+
+2. Scale, Memory Safety & Quota Protection (`backend/app/a2a/artifact_store.py`, `backend/app/data/fastf1_cache.py`, `backend/app/a2a/agents/research_agent.py`, `backend/app/chat/router.py`):
+   - Add 30-minute TTL eviction and a 200-item max cap to `ArtifactStore` so long-running containers never leak RAM.
+   - Add a read-through/write-through **Query Response Cache** (using `REDIS_URL` if configured, otherwise an in-memory 128-item TTL LRU cache) keyed by normalized standalone query so repeated telemetry, DuckDB SQL, and research requests return immediately without burning LLM quota or re-downloading FastF1 sessions.
+   - Wrap FastF1 `session.load()` calls in an `asyncio.Semaphore(2)` to prevent concurrent RAM spikes, and direct runtime FastF1 cache writes to `{CACHE_DIR}/fastf1` with a safe `try/except` fallback if disk writes fail.
+   - Read seeded research cache files from `./data/research_cache/` while writing new runtime entries to `{CACHE_DIR}/research_cache` inside a `try/except` guard.
+   - Add lightweight per-IP sliding-window rate limiting (`RATE_LIMIT_PER_MIN`) on `POST /api/chat/stream` returning HTTP 429 with a clean pit-wall radio notice.
+
+3. Frontend Dynamic API Base & SPA Routing (`frontend/src/`, `frontend/`):
+   - Replace any hardcoded `localhost:8000` URLs across SSE streaming, health checks, and API helpers with:
+     `const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/$/, "");`
+   - Create `frontend/.env.example` documenting `VITE_API_URL=http://localhost:8000`.
+   - Create `frontend/vercel.json` with a catch-all SPA rewrite to `/index.html`.
+
+4. Portable Backend `Dockerfile` & `.dockerignore` (repo root):
+   - Create a slim Python 3.11+ `Dockerfile` that:
+     * Installs `backend/requirements.txt` (including `redis` if used for optional `REDIS_URL`).
+     * Copies `backend/`, the read-only `.duckdb` database, and seed `./data/research_cache/`.
+     * Sets `APP_ENV=production`, `CACHE_DIR=/tmp/pitwall_cache`, and creates/switches to a non-root user (`uid=1000`, required by Hugging Face Spaces).
+     * Launches `uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-7860}`.
+   - Create `.dockerignore` excluding `.env`, `.git`, `frontend/node_modules`, `__pycache__`, `backend/tests`, and local FastF1 cache directories.
+
+5. Verification:
+   - Add unit tests in `backend/tests/test_deployment_hardening.py` verifying:
+     * `ArtifactStore` TTL and max-size eviction.
+     * Per-IP rate limiter returning HTTP 429 cleanly after exceeding limit.
+     * Query response cache serving repeat hits with zero LLM calls.
+     * `POST /api/chat/stream` including `X-Accel-Buffering: no`.
+     * `APP_ENV=production` disabling Ollama fallback.
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+---
+
+Add a readme.md file for our project here so that people can undertstand this project workflow and everything
+
+---
+
+I need to get this readme into the master branch not on the current branch
+
+---
+
+Hey, can you check the CORS policy for the backend? I have deployed backend to Vercel and the frontend on Render, but I am getting CORS policy error from the frontend although in the vercel env I've added CORS_ORIGIN to the render url
+
+---
+
+revert that back, Instead of one whole commit I can simply change the spelling in env varibales at vercel and redeploy right
+
+---
+
+wait s it CORS_ORIGIN o CORS_ORIGINS?
+
+---
+
+Just list all the envs with type of secret and config for me
+
+---
+
+/speckit-specify Replace the placeholder "demo racing engineer" login in PitWall AI with real user authentication. Users must be able to register with email and password, see clear feedback when email confirmation is required, sign in, stay signed in across page reloads, and sign out. Remove all hardcoded demo credentials, pre-filled demo login buttons, and unauthenticated bypasses. Every chat, telemetry, and historical query request must require a valid authenticated session and cleanly reject missing, invalid, or expired sessions, while public health and service status endpoints remain accessible without authentication. The sign-in and sign-up UI must match PitWall AI's existing design and clearly surface authentication or validation errors.
+
+---
+
+/speckit-clarify Focus on email confirmation UX, expired session handling during active responses, and confirming which routes stay public.
+
+---
+
+/speckit-plan Use Supabase Auth across our split production deployment: FastAPI backend in a stateless Docker container on Vercel (CORS_ORIGINS=https://pit-wall-ai.onrender.com) and React/Vite frontend as a Static Site on Render. Production environment variables are already configured: SUPABASE_URL on Vercel (support optional SUPABASE_JWT_SECRET fallback for legacy HS256 tokens), and VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY on Render. On the backend, keep auth 100% stateless with zero local user database files and do not install the full supabase Python SDK; verify Supabase Bearer JWTs with PyJWT and PyJWKClient against the project's JWKS endpoint (cached, executed off the async event loop, validating audience="authenticated") and list cryptography explicitly in backend/requirements.txt. On the frontend, use @supabase/supabase-js for session state, declare the new Vite env vars for strict TypeScript builds, read the current session access token before each API and SSE stream request, and remove the demo auth flow. Cover valid, expired, invalid, and missing tokens with pytest alongside existing deployment hardening tests.
+
+---
+
+/speckit-tasks
+
+---
+
+/speckit-analyze
+
+---
+
+yeah sure
+
+---
+
+yeah apply them
+
+---
+
+/speckit-implement
+
+---
+
+where should I update supabase url and key?? for both frontend and backend
+
+---
+
+why not frontend take it from root .env
+
+---
+
+yeah, that's what I want
+
+---
+
+Alright, let's push this to main branch and let it go live
+
+---
+
+Authentication and everything is working fine now but, when I'm asking any question, I'm getting this error:⚠️ PitWall Error: Unable to load full-lap telemetry for VER at 2024 Autodromo Nazionale di Monza: Unable to load OpenF1 telemetry for VER in 2024 Autodromo Nazionale di Monza: OpenF1 request failed for sessions: Client error '401 Unauthorized' for url 'https://api.openf1.org/v1/sessions?year=2024' For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401Full-lap telemetry error: Unable to load full-lap telemetry for VER at 2024 Autodromo Nazionale di Monza: Unable to load OpenF1 telemetry for VER in 2024 Autodromo Nazionale di Monza: OpenF1 request failed for sessions: Client error '401 Unauthorized' for url 'https://api.openf1.org/v1/sessions?year=2024' For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401 Please resolve this error looks like you've missed removing some protected routes or something
