@@ -1,0 +1,61 @@
+Hey, can you check the CORS policy for the backend? I have deployed backend to Vercel and the frontend on Render, but I am getting CORS policy error from the frontend although in the vercel env I've added CORS_ORIGIN to the render url
+
+---
+
+revert that back, Instead of one whole commit I can simply change the spelling in env varibales at vercel and redeploy right
+
+---
+
+wait s it CORS_ORIGIN o CORS_ORIGINS?
+
+---
+
+Just list all the envs with type of secret and config for me
+
+---
+
+/speckit-specify Replace the placeholder "demo racing engineer" login in PitWall AI with real user authentication. Users must be able to register with email and password, see clear feedback when email confirmation is required, sign in, stay signed in across page reloads, and sign out. Remove all hardcoded demo credentials, pre-filled demo login buttons, and unauthenticated bypasses. Every chat, telemetry, and historical query request must require a valid authenticated session and cleanly reject missing, invalid, or expired sessions, while public health and service status endpoints remain accessible without authentication. The sign-in and sign-up UI must match PitWall AI's existing design and clearly surface authentication or validation errors.
+
+---
+
+/speckit-clarify Focus on email confirmation UX, expired session handling during active responses, and confirming which routes stay public.
+
+---
+
+/speckit-plan Use Supabase Auth across our split production deployment: FastAPI backend in a stateless Docker container on Vercel (CORS_ORIGINS=https://pit-wall-ai.onrender.com) and React/Vite frontend as a Static Site on Render. Production environment variables are already configured: SUPABASE_URL on Vercel (support optional SUPABASE_JWT_SECRET fallback for legacy HS256 tokens), and VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY on Render. On the backend, keep auth 100% stateless with zero local user database files and do not install the full supabase Python SDK; verify Supabase Bearer JWTs with PyJWT and PyJWKClient against the project's JWKS endpoint (cached, executed off the async event loop, validating audience="authenticated") and list cryptography explicitly in backend/requirements.txt. On the frontend, use @supabase/supabase-js for session state, declare the new Vite env vars for strict TypeScript builds, read the current session access token before each API and SSE stream request, and remove the demo auth flow. Cover valid, expired, invalid, and missing tokens with pytest alongside existing deployment hardening tests.
+
+---
+
+/speckit-tasks
+
+---
+
+/speckit-analyze
+
+---
+
+yeah sure
+
+---
+
+yeah apply them
+
+---
+
+/speckit-implement
+
+---
+
+where should I update supabase url and key?? for both frontend and backend
+
+---
+
+why not frontend take it from root .env
+
+---
+
+yeah, that's what I want
+
+---
+
+Alright, let's push this to main branch and let it go live

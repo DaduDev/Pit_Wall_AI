@@ -1,0 +1,83 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M8HK39458C27R8Q0318BN48P",
+  "session_id": "e52e5399-a9e6-4189-b2f6-798ed5d0de03",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-28T17:26:28.1421512Z",
+  "branch": "master",
+  "checkpoints_count": 16,
+  "save_step_count": 9,
+  "files_touched": [
+    "backend/app/a2a/client.py",
+    "backend/app/a2a/registry.py",
+    "backend/app/auth/dependencies.py",
+    "backend/app/auth/router.py",
+    "backend/app/chat/router.py",
+    "backend/app/config.py",
+    "backend/pyproject.toml",
+    "backend/requirements.txt",
+    "backend/tests/conftest.py",
+    "backend/tests/test_a2a_orchestrator_e2e.py",
+    "backend/tests/test_a2a_specialists.py",
+    "backend/tests/test_auth_and_session.py",
+    "backend/tests/test_chat_stream.py",
+    "backend/tests/test_deployment_hardening.py",
+    "backend/tests/test_live_testing_bug_fixes.py",
+    "backend/tests/test_strategy.py",
+    "frontend/.env.example",
+    "frontend/package-lock.json",
+    "frontend/package.json",
+    "frontend/src/App.tsx",
+    "frontend/src/components/Auth/LoginPage.tsx",
+    "frontend/src/hooks/useAuth.ts",
+    "frontend/src/hooks/useSSEStream.ts",
+    "frontend/src/services/api.ts",
+    "frontend/src/types/index.ts",
+    "frontend/src/vite-env.d.ts",
+    "frontend/vite.config.mjs",
+    "specs/002-real-user-auth/checklists/requirements.md",
+    "specs/002-real-user-auth/contracts/auth-api.md",
+    "specs/002-real-user-auth/data-model.md",
+    "specs/002-real-user-auth/plan.md",
+    "specs/002-real-user-auth/quickstart.md",
+    "specs/002-real-user-auth/research.md",
+    "specs/002-real-user-auth/spec.md",
+    "specs/002-real-user-auth/tasks.md"
+  ],
+  "agent": "Antigravity",
+  "model": "",
+  "turn_id": "d3e2ebb1bb91",
+  "checkpoint_transcript_start": 5729,
+  "transcript_lines_at_start": 5729,
+  "token_usage": {
+    "input_tokens": 1051610,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 21106464,
+    "output_tokens": 107825,
+    "api_call_count": 86
+  },
+  "session_token_usage": {
+    "input_tokens": 14199348,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 331614973,
+    "output_tokens": 1603757,
+    "api_call_count": 2187
+  },
+  "redaction": {
+    "replacements": 181,
+    "layers": {
+      "betterleaks": 63,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 100,
+      "credentialed_uri": 0,
+      "entropy": 40,
+      "key_context": 0,
+      "provider_token": 1,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 39
+  }
+}
