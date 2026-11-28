@@ -16,13 +16,70 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   isStreaming?: boolean;
+  status?: string | null;
+  chart?: PlotlySpec | null;
+  minimap?: PlotlySpec | null;
+  trace?: EngineeringTrace | null;
+}
+
+export interface A2AHop {
+  agent_name: string;
+  endpoint: string;
+  duration_ms: number;
+  dataset_id?: string;
+  status: 'success' | 'error';
+  error?: string;
+}
+
+export interface WebSource {
+  title: string;
+  url: string;
+}
+
+export type LLMProviderId =
+  | 'gemini'
+  | 'cache'
+  | 'groq_fallback'
+  | 'openrouter_fallback'
+  | 'ollama_fallback'
+  | string;
+
+export interface WebIntelligenceCardData {
+  title: string;
+  summary: string;
+  bullets?: string[];
+  sources: WebSource[];
+  grounded?: boolean;
+  provider?: LLMProviderId;
+  provider_label?: string;
+}
+
+export interface KpiMetric {
+  label: string;
+  value: string;
+}
+
+export interface KpiCardData {
+  subtitle?: string;
+  metrics: KpiMetric[];
+}
+
+export interface DataTableData {
+  subtitle?: string;
+  columns: string[];
+  rows: Record<string, any>[];
 }
 
 export interface EngineeringTrace {
-  data_domain: 'historical' | 'telemetry' | 'mixed';
+  data_domain: 'historical' | 'telemetry' | 'mixed' | 'research';
   query?: string;
   execution_time_ms?: number;
   row_count?: number;
+  dataset_id?: string;
+  a2a_hops?: A2AHop[];
+  grounding_sources?: WebSource[];
+  grounded?: boolean;
+  provider?: LLMProviderId;
   telemetry_params?: {
     year?: number;
     grand_prix?: string;
@@ -100,7 +157,7 @@ export interface SectorSummary {
 }
 
 export interface ChartMetadata {
-  domain?: 'historical' | 'telemetry' | 'mixed';
+  domain?: 'historical' | 'historical_sql' | 'telemetry' | 'mixed' | 'research';
   year?: number;
   grand_prix?: string;
   session_name?: string;
@@ -123,10 +180,17 @@ export interface ChartMetadata {
 }
 
 export interface PlotlySpec {
-  data: any[];
-  layout: Record<string, any>;
+  data?: any[];
+  layout?: Record<string, any>;
   config?: Record<string, any>;
+  viz_type?: string;
   chart_type?: string;
+  title?: string;
+  figure?: any;
+  minimap?: any;
+  kpi_card?: KpiCardData;
+  data_table?: DataTableData;
+  web_intelligence_card?: WebIntelligenceCardData;
   metadata?: ChartMetadata;
 }
 

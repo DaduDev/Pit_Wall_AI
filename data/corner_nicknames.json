@@ -1,290 +1,200 @@
 [
-  {
-    "circuit_key": "silverstone",
-    "turn_number": 9,
-    "nickname": "Copse",
-    "distance_m": 2980.0
-  },
-  {
-    "circuit_key": "silverstone",
-    "turn_number": 10,
-    "nickname": "Maggotts",
-    "distance_m": 3320.0
-  },
-  {
-    "circuit_key": "silverstone",
-    "turn_number": 11,
-    "nickname": "Becketts",
-    "distance_m": 3550.0
-  },
-  {
-    "circuit_key": "silverstone",
-    "turn_number": 13,
-    "nickname": "Chapel",
-    "distance_m": 3800.0
-  },
-  {
-    "circuit_key": "silverstone",
-    "turn_number": 15,
-    "nickname": "Stowe",
-    "distance_m": 4650.0
-  },
-  {
-    "circuit_key": "silverstone",
-    "turn_number": 16,
-    "nickname": "Vale",
-    "distance_m": 5050.0
-  },
-  {
-    "circuit_key": "silverstone",
-    "turn_number": 18,
-    "nickname": "Club",
-    "distance_m": 5400.0
-  },
-  {
-    "circuit_key": "spa",
-    "turn_number": 1,
-    "nickname": "La Source",
-    "distance_m": 350.0
-  },
-  {
-    "circuit_key": "spa",
-    "turn_number": 2,
-    "nickname": "Eau Rouge",
-    "distance_m": 900.0
-  },
-  {
-    "circuit_key": "spa",
-    "turn_number": 3,
-    "nickname": "Raidillon",
-    "distance_m": 1150.0
-  },
-  {
-    "circuit_key": "spa",
-    "turn_number": 5,
-    "nickname": "Les Combes",
-    "distance_m": 2100.0
-  },
-  {
-    "circuit_key": "spa",
-    "turn_number": 7,
-    "nickname": "Malmedy",
-    "distance_m": 2550.0
-  },
-  {
-    "circuit_key": "spa",
-    "turn_number": 10,
-    "nickname": "Pouhon",
-    "distance_m": 3950.0
-  },
-  {
-    "circuit_key": "spa",
-    "turn_number": 16,
-    "nickname": "Blanchimont",
-    "distance_m": 6100.0
-  },
-  {
-    "circuit_key": "spa",
-    "turn_number": 18,
-    "nickname": "Bus Stop",
-    "distance_m": 6800.0
-  },
-  {
-    "circuit_key": "monza",
-    "turn_number": 1,
-    "nickname": "Variante del Rettifilo",
-    "distance_m": 920.0
-  },
-  {
-    "circuit_key": "monza",
-    "turn_number": 3,
-    "nickname": "Curva Grande",
-    "distance_m": 1350.0
-  },
-  {
-    "circuit_key": "monza",
-    "turn_number": 4,
-    "nickname": "Variante della Roggia",
-    "distance_m": 2200.0
-  },
-  {
-    "circuit_key": "monza",
-    "turn_number": 6,
-    "nickname": "Lesmo 1",
-    "distance_m": 2700.0
-  },
-  {
-    "circuit_key": "monza",
-    "turn_number": 7,
-    "nickname": "Lesmo 2",
-    "distance_m": 2980.0
-  },
-  {
-    "circuit_key": "monza",
-    "turn_number": 8,
-    "nickname": "Variante Ascari",
-    "distance_m": 4100.0
-  },
-  {
-    "circuit_key": "monza",
-    "turn_number": 11,
-    "nickname": "Parabolica",
-    "distance_m": 5300.0
-  },
-  {
-    "circuit_key": "monza",
-    "turn_number": 11,
-    "nickname": "Curva Alboreto",
-    "distance_m": 5300.0
-  },
-  {
-    "circuit_key": "suzuka",
-    "turn_number": 1,
-    "nickname": "First Curve",
-    "distance_m": 350.0
-  },
-  {
-    "circuit_key": "suzuka",
-    "turn_number": 8,
-    "nickname": "Degner 1",
-    "distance_m": 2200.0
-  },
-  {
-    "circuit_key": "suzuka",
-    "turn_number": 9,
-    "nickname": "Degner 2",
-    "distance_m": 2400.0
-  },
-  {
-    "circuit_key": "suzuka",
-    "turn_number": 11,
-    "nickname": "Hairpin",
-    "distance_m": 3050.0
-  },
-  {
-    "circuit_key": "suzuka",
-    "turn_number": 13,
-    "nickname": "Spoon",
-    "distance_m": 4100.0
-  },
-  {
-    "circuit_key": "suzuka",
-    "turn_number": 15,
-    "nickname": "130R",
-    "distance_m": 4900.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 1,
-    "nickname": "Sainte Devote",
-    "distance_m": 250.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 3,
-    "nickname": "Massenet",
-    "distance_m": 650.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 4,
-    "nickname": "Casino Square",
-    "distance_m": 850.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 5,
-    "nickname": "Mirabeau Haute",
-    "distance_m": 1050.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 6,
-    "nickname": "Grand Hotel Hairpin",
-    "distance_m": 1250.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 6,
-    "nickname": "Loews Hairpin",
-    "distance_m": 1250.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 7,
-    "nickname": "Mirabeau Bas",
-    "distance_m": 1400.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 8,
-    "nickname": "Portier",
-    "distance_m": 1550.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 10,
-    "nickname": "Nouvelle Chicane",
-    "distance_m": 2050.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 12,
-    "nickname": "Tabac",
-    "distance_m": 2350.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 15,
-    "nickname": "Piscine",
-    "distance_m": 2600.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 17,
-    "nickname": "Rascasse",
-    "distance_m": 2900.0
-  },
-  {
-    "circuit_key": "monaco",
-    "turn_number": 19,
-    "nickname": "Anthony Noghes",
-    "distance_m": 3150.0
-  },
-  {
-    "circuit_key": "interlagos",
-    "turn_number": 1,
-    "nickname": "Senna S",
-    "distance_m": 350.0
-  },
-  {
-    "circuit_key": "interlagos",
-    "turn_number": 4,
-    "nickname": "Descida do Lago",
-    "distance_m": 1450.0
-  },
-  {
-    "circuit_key": "interlagos",
-    "turn_number": 12,
-    "nickname": "Juncao",
-    "distance_m": 3400.0
-  },
-  {
-    "circuit_key": "zandvoort",
-    "turn_number": 1,
-    "nickname": "Tarzan",
-    "distance_m": 300.0
-  },
-  {
-    "circuit_key": "zandvoort",
-    "turn_number": 3,
-    "nickname": "Hugenholtz",
-    "distance_m": 950.0
-  },
-  {
-    "circuit_key": "zandvoort",
-    "turn_number": 14,
-    "nickname": "Arie Luyendyk",
-    "distance_m": 3850.0
-  }
+  { "circuit_key": "silverstone", "turn_number": 1, "nickname": "Abbey", "distance_m": 450.0 },
+  { "circuit_key": "silverstone", "turn_number": 2, "nickname": "Farm Curve", "distance_m": 700.0 },
+  { "circuit_key": "silverstone", "turn_number": 3, "nickname": "Village", "distance_m": 1100.0 },
+  { "circuit_key": "silverstone", "turn_number": 4, "nickname": "The Loop", "distance_m": 1300.0 },
+  { "circuit_key": "silverstone", "turn_number": 5, "nickname": "Aintree", "distance_m": 1550.0 },
+  { "circuit_key": "silverstone", "turn_number": 6, "nickname": "Brooklands", "distance_m": 2250.0 },
+  { "circuit_key": "silverstone", "turn_number": 7, "nickname": "Luffield", "distance_m": 2550.0 },
+  { "circuit_key": "silverstone", "turn_number": 8, "nickname": "Woodcote", "distance_m": 2750.0 },
+  { "circuit_key": "silverstone", "turn_number": 9, "nickname": "Copse", "distance_m": 2980.0 },
+  { "circuit_key": "silverstone", "turn_number": 10, "nickname": "Maggotts", "distance_m": 3320.0 },
+  { "circuit_key": "silverstone", "turn_number": 11, "nickname": "Becketts", "distance_m": 3550.0 },
+  { "circuit_key": "silverstone", "turn_number": 13, "nickname": "Chapel", "distance_m": 3800.0 },
+  { "circuit_key": "silverstone", "turn_number": 15, "nickname": "Stowe", "distance_m": 4650.0 },
+  { "circuit_key": "silverstone", "turn_number": 16, "nickname": "Vale", "distance_m": 5050.0 },
+  { "circuit_key": "silverstone", "turn_number": 18, "nickname": "Club", "distance_m": 5400.0 },
+
+  { "circuit_key": "spa", "turn_number": 1, "nickname": "La Source", "distance_m": 350.0 },
+  { "circuit_key": "spa", "turn_number": 2, "nickname": "Eau Rouge", "distance_m": 900.0 },
+  { "circuit_key": "spa", "turn_number": 3, "nickname": "Raidillon", "distance_m": 1150.0 },
+  { "circuit_key": "spa", "turn_number": 5, "nickname": "Les Combes", "distance_m": 2100.0 },
+  { "circuit_key": "spa", "turn_number": 7, "nickname": "Malmedy", "distance_m": 2550.0 },
+  { "circuit_key": "spa", "turn_number": 8, "nickname": "Rivage", "distance_m": 2900.0 },
+  { "circuit_key": "spa", "turn_number": 8, "nickname": "Bruxelles", "distance_m": 2900.0 },
+  { "circuit_key": "spa", "turn_number": 9, "nickname": "Speakers Corner", "distance_m": 3300.0 },
+  { "circuit_key": "spa", "turn_number": 10, "nickname": "Pouhon", "distance_m": 3950.0 },
+  { "circuit_key": "spa", "turn_number": 12, "nickname": "Campus", "distance_m": 4600.0 },
+  { "circuit_key": "spa", "turn_number": 12, "nickname": "Pif-Paf", "distance_m": 4600.0 },
+  { "circuit_key": "spa", "turn_number": 13, "nickname": "Stavelot", "distance_m": 5100.0 },
+  { "circuit_key": "spa", "turn_number": 14, "nickname": "Courbe Paul Frere", "distance_m": 5400.0 },
+  { "circuit_key": "spa", "turn_number": 16, "nickname": "Blanchimont", "distance_m": 6100.0 },
+  { "circuit_key": "spa", "turn_number": 18, "nickname": "Bus Stop", "distance_m": 6800.0 },
+
+  { "circuit_key": "monza", "turn_number": 1, "nickname": "Variante del Rettifilo", "distance_m": 920.0 },
+  { "circuit_key": "monza", "turn_number": 1, "nickname": "Prima Variante", "distance_m": 920.0 },
+  { "circuit_key": "monza", "turn_number": 3, "nickname": "Curva Grande", "distance_m": 1350.0 },
+  { "circuit_key": "monza", "turn_number": 3, "nickname": "Curva Biassono", "distance_m": 1350.0 },
+  { "circuit_key": "monza", "turn_number": 4, "nickname": "Variante della Roggia", "distance_m": 2200.0 },
+  { "circuit_key": "monza", "turn_number": 4, "nickname": "Seconda Variante", "distance_m": 2200.0 },
+  { "circuit_key": "monza", "turn_number": 6, "nickname": "Lesmo 1", "distance_m": 2700.0 },
+  { "circuit_key": "monza", "turn_number": 7, "nickname": "Lesmo 2", "distance_m": 2980.0 },
+  { "circuit_key": "monza", "turn_number": 8, "nickname": "Variante Ascari", "distance_m": 4100.0 },
+  { "circuit_key": "monza", "turn_number": 8, "nickname": "Ascari", "distance_m": 4100.0 },
+  { "circuit_key": "monza", "turn_number": 11, "nickname": "Parabolica", "distance_m": 5300.0 },
+  { "circuit_key": "monza", "turn_number": 11, "nickname": "Curva Alboreto", "distance_m": 5300.0 },
+
+  { "circuit_key": "suzuka", "turn_number": 1, "nickname": "First Curve", "distance_m": 350.0 },
+  { "circuit_key": "suzuka", "turn_number": 3, "nickname": "S Curves", "distance_m": 900.0 },
+  { "circuit_key": "suzuka", "turn_number": 7, "nickname": "Dunlop Curve", "distance_m": 1800.0 },
+  { "circuit_key": "suzuka", "turn_number": 8, "nickname": "Degner 1", "distance_m": 2200.0 },
+  { "circuit_key": "suzuka", "turn_number": 8, "nickname": "Degner", "distance_m": 2200.0 },
+  { "circuit_key": "suzuka", "turn_number": 9, "nickname": "Degner 2", "distance_m": 2400.0 },
+  { "circuit_key": "suzuka", "turn_number": 11, "nickname": "Hairpin", "distance_m": 3050.0 },
+  { "circuit_key": "suzuka", "turn_number": 13, "nickname": "Spoon Curve", "distance_m": 4100.0 },
+  { "circuit_key": "suzuka", "turn_number": 13, "nickname": "Spoon", "distance_m": 4100.0 },
+  { "circuit_key": "suzuka", "turn_number": 15, "nickname": "130R", "distance_m": 4900.0 },
+  { "circuit_key": "suzuka", "turn_number": 16, "nickname": "Casio Triangle", "distance_m": 5300.0 },
+  { "circuit_key": "suzuka", "turn_number": 16, "nickname": "Chicane", "distance_m": 5300.0 },
+
+  { "circuit_key": "monaco", "turn_number": 1, "nickname": "Sainte Devote", "distance_m": 250.0 },
+  { "circuit_key": "monaco", "turn_number": 2, "nickname": "Beau Rivage", "distance_m": 450.0 },
+  { "circuit_key": "monaco", "turn_number": 3, "nickname": "Massenet", "distance_m": 650.0 },
+  { "circuit_key": "monaco", "turn_number": 4, "nickname": "Casino Square", "distance_m": 850.0 },
+  { "circuit_key": "monaco", "turn_number": 5, "nickname": "Mirabeau Haute", "distance_m": 1050.0 },
+  { "circuit_key": "monaco", "turn_number": 5, "nickname": "Mirabeau", "distance_m": 1050.0 },
+  { "circuit_key": "monaco", "turn_number": 6, "nickname": "Grand Hotel Hairpin", "distance_m": 1250.0 },
+  { "circuit_key": "monaco", "turn_number": 6, "nickname": "Loews Hairpin", "distance_m": 1250.0 },
+  { "circuit_key": "monaco", "turn_number": 6, "nickname": "Fairmont Hairpin", "distance_m": 1250.0 },
+  { "circuit_key": "monaco", "turn_number": 7, "nickname": "Mirabeau Bas", "distance_m": 1400.0 },
+  { "circuit_key": "monaco", "turn_number": 8, "nickname": "Portier", "distance_m": 1550.0 },
+  { "circuit_key": "monaco", "turn_number": 9, "nickname": "Tunnel", "distance_m": 1800.0 },
+  { "circuit_key": "monaco", "turn_number": 10, "nickname": "Nouvelle Chicane", "distance_m": 2050.0 },
+  { "circuit_key": "monaco", "turn_number": 12, "nickname": "Tabac", "distance_m": 2350.0 },
+  { "circuit_key": "monaco", "turn_number": 13, "nickname": "Louis Chiron", "distance_m": 2500.0 },
+  { "circuit_key": "monaco", "turn_number": 15, "nickname": "Piscine", "distance_m": 2600.0 },
+  { "circuit_key": "monaco", "turn_number": 15, "nickname": "Swimming Pool", "distance_m": 2600.0 },
+  { "circuit_key": "monaco", "turn_number": 17, "nickname": "Rascasse", "distance_m": 2900.0 },
+  { "circuit_key": "monaco", "turn_number": 19, "nickname": "Anthony Noghes", "distance_m": 3150.0 },
+
+  { "circuit_key": "interlagos", "turn_number": 1, "nickname": "Senna S", "distance_m": 350.0 },
+  { "circuit_key": "interlagos", "turn_number": 1, "nickname": "S do Senna", "distance_m": 350.0 },
+  { "circuit_key": "interlagos", "turn_number": 3, "nickname": "Curva do Sol", "distance_m": 800.0 },
+  { "circuit_key": "interlagos", "turn_number": 4, "nickname": "Descida do Lago", "distance_m": 1450.0 },
+  { "circuit_key": "interlagos", "turn_number": 6, "nickname": "Ferradura", "distance_m": 2050.0 },
+  { "circuit_key": "interlagos", "turn_number": 8, "nickname": "Laranjinha", "distance_m": 2400.0 },
+  { "circuit_key": "interlagos", "turn_number": 9, "nickname": "Pinheirinho", "distance_m": 2700.0 },
+  { "circuit_key": "interlagos", "turn_number": 10, "nickname": "Bico de Pato", "distance_m": 2950.0 },
+  { "circuit_key": "interlagos", "turn_number": 11, "nickname": "Mergulho", "distance_m": 3150.0 },
+  { "circuit_key": "interlagos", "turn_number": 12, "nickname": "Juncao", "distance_m": 3400.0 },
+  { "circuit_key": "interlagos", "turn_number": 13, "nickname": "Subida dos Boxes", "distance_m": 3750.0 },
+
+  { "circuit_key": "zandvoort", "turn_number": 1, "nickname": "Tarzan", "distance_m": 300.0 },
+  { "circuit_key": "zandvoort", "turn_number": 1, "nickname": "Tarzanbocht", "distance_m": 300.0 },
+  { "circuit_key": "zandvoort", "turn_number": 2, "nickname": "Gerlachbocht", "distance_m": 600.0 },
+  { "circuit_key": "zandvoort", "turn_number": 3, "nickname": "Hugenholtz", "distance_m": 950.0 },
+  { "circuit_key": "zandvoort", "turn_number": 3, "nickname": "Hugenholtzbocht", "distance_m": 950.0 },
+  { "circuit_key": "zandvoort", "turn_number": 4, "nickname": "Hunserug", "distance_m": 1200.0 },
+  { "circuit_key": "zandvoort", "turn_number": 5, "nickname": "Rob Slotemakerbocht", "distance_m": 1400.0 },
+  { "circuit_key": "zandvoort", "turn_number": 7, "nickname": "Scheivlak", "distance_m": 1850.0 },
+  { "circuit_key": "zandvoort", "turn_number": 8, "nickname": "Mastersbocht", "distance_m": 2100.0 },
+  { "circuit_key": "zandvoort", "turn_number": 11, "nickname": "Hans Ernstbocht", "distance_m": 3000.0 },
+  { "circuit_key": "zandvoort", "turn_number": 11, "nickname": "Kumhobocht", "distance_m": 3000.0 },
+  { "circuit_key": "zandvoort", "turn_number": 14, "nickname": "Arie Luyendyk", "distance_m": 3850.0 },
+  { "circuit_key": "zandvoort", "turn_number": 14, "nickname": "Arie Luyendykbocht", "distance_m": 3850.0 },
+
+  { "circuit_key": "montreal", "turn_number": 1, "nickname": "Virage Senna", "distance_m": 350.0 },
+  { "circuit_key": "montreal", "turn_number": 1, "nickname": "Senna S", "distance_m": 350.0 },
+  { "circuit_key": "montreal", "turn_number": 5, "nickname": "Virage du Pont", "distance_m": 1600.0 },
+  { "circuit_key": "montreal", "turn_number": 10, "nickname": "Epingle", "distance_m": 3100.0 },
+  { "circuit_key": "montreal", "turn_number": 10, "nickname": "Hairpin", "distance_m": 3100.0 },
+  { "circuit_key": "montreal", "turn_number": 13, "nickname": "Wall of Champions", "distance_m": 4250.0 },
+
+  { "circuit_key": "spielberg", "turn_number": 1, "nickname": "Niki Lauda Kurve", "distance_m": 300.0 },
+  { "circuit_key": "spielberg", "turn_number": 3, "nickname": "Remus", "distance_m": 1200.0 },
+  { "circuit_key": "spielberg", "turn_number": 4, "nickname": "Schlossgold", "distance_m": 1800.0 },
+  { "circuit_key": "spielberg", "turn_number": 6, "nickname": "Rauch", "distance_m": 2500.0 },
+  { "circuit_key": "spielberg", "turn_number": 7, "nickname": "Wurth", "distance_m": 2900.0 },
+  { "circuit_key": "spielberg", "turn_number": 9, "nickname": "Rindt", "distance_m": 3700.0 },
+  { "circuit_key": "spielberg", "turn_number": 10, "nickname": "Red Bull Mobile", "distance_m": 4100.0 },
+
+  { "circuit_key": "imola", "turn_number": 2, "nickname": "Tamburello", "distance_m": 650.0 },
+  { "circuit_key": "imola", "turn_number": 5, "nickname": "Villeneuve", "distance_m": 1400.0 },
+  { "circuit_key": "imola", "turn_number": 7, "nickname": "Tosa", "distance_m": 1850.0 },
+  { "circuit_key": "imola", "turn_number": 9, "nickname": "Piratella", "distance_m": 2500.0 },
+  { "circuit_key": "imola", "turn_number": 11, "nickname": "Acque Minerali", "distance_m": 3050.0 },
+  { "circuit_key": "imola", "turn_number": 14, "nickname": "Variante Alta", "distance_m": 3800.0 },
+  { "circuit_key": "imola", "turn_number": 14, "nickname": "Gresini Chicane", "distance_m": 3800.0 },
+  { "circuit_key": "imola", "turn_number": 17, "nickname": "Rivazza", "distance_m": 4450.0 },
+
+  { "circuit_key": "catalunya", "turn_number": 1, "nickname": "Elf", "distance_m": 750.0 },
+  { "circuit_key": "catalunya", "turn_number": 3, "nickname": "Renault", "distance_m": 1150.0 },
+  { "circuit_key": "catalunya", "turn_number": 4, "nickname": "Repsol", "distance_m": 1500.0 },
+  { "circuit_key": "catalunya", "turn_number": 5, "nickname": "Seat", "distance_m": 1850.0 },
+  { "circuit_key": "catalunya", "turn_number": 9, "nickname": "Campsa", "distance_m": 2850.0 },
+  { "circuit_key": "catalunya", "turn_number": 10, "nickname": "La Caixa", "distance_m": 3350.0 },
+  { "circuit_key": "catalunya", "turn_number": 12, "nickname": "Banc Sabadell", "distance_m": 3900.0 },
+
+  { "circuit_key": "melbourne", "turn_number": 1, "nickname": "Jones", "distance_m": 350.0 },
+  { "circuit_key": "melbourne", "turn_number": 2, "nickname": "Brabham", "distance_m": 550.0 },
+  { "circuit_key": "melbourne", "turn_number": 3, "nickname": "Sports Center", "distance_m": 1150.0 },
+  { "circuit_key": "melbourne", "turn_number": 4, "nickname": "Whiteford", "distance_m": 1350.0 },
+  { "circuit_key": "melbourne", "turn_number": 5, "nickname": "Marina", "distance_m": 1600.0 },
+  { "circuit_key": "melbourne", "turn_number": 9, "nickname": "Clark", "distance_m": 3000.0 },
+  { "circuit_key": "melbourne", "turn_number": 11, "nickname": "Waite", "distance_m": 3800.0 },
+  { "circuit_key": "melbourne", "turn_number": 12, "nickname": "Hill", "distance_m": 4000.0 },
+  { "circuit_key": "melbourne", "turn_number": 13, "nickname": "Ascari", "distance_m": 4500.0 },
+  { "circuit_key": "melbourne", "turn_number": 14, "nickname": "Stewart", "distance_m": 4800.0 },
+
+  { "circuit_key": "austin", "turn_number": 1, "nickname": "Big Red", "distance_m": 450.0 },
+  { "circuit_key": "austin", "turn_number": 3, "nickname": "Esses", "distance_m": 1100.0 },
+  { "circuit_key": "austin", "turn_number": 11, "nickname": "Hairpin", "distance_m": 2800.0 },
+  { "circuit_key": "austin", "turn_number": 16, "nickname": "Triple Apex", "distance_m": 4300.0 },
+
+  { "circuit_key": "mexico", "turn_number": 1, "nickname": "Moises Solana", "distance_m": 900.0 },
+  { "circuit_key": "mexico", "turn_number": 4, "nickname": "Lake S", "distance_m": 1800.0 },
+  { "circuit_key": "mexico", "turn_number": 12, "nickname": "Foro Sol", "distance_m": 3750.0 },
+  { "circuit_key": "mexico", "turn_number": 12, "nickname": "Stadium", "distance_m": 3750.0 },
+  { "circuit_key": "mexico", "turn_number": 16, "nickname": "Peraltada", "distance_m": 4150.0 },
+
+  { "circuit_key": "singapore", "turn_number": 1, "nickname": "Sheares", "distance_m": 400.0 },
+  { "circuit_key": "singapore", "turn_number": 7, "nickname": "Memorial", "distance_m": 1800.0 },
+  { "circuit_key": "singapore", "turn_number": 9, "nickname": "Stamford", "distance_m": 2250.0 },
+  { "circuit_key": "singapore", "turn_number": 10, "nickname": "Padang", "distance_m": 2600.0 },
+  { "circuit_key": "singapore", "turn_number": 10, "nickname": "Singapore Sling", "distance_m": 2600.0 },
+  { "circuit_key": "singapore", "turn_number": 13, "nickname": "Anderson Bridge", "distance_m": 3200.0 },
+
+  { "circuit_key": "baku", "turn_number": 8, "nickname": "Castle Section", "distance_m": 2400.0 },
+  { "circuit_key": "baku", "turn_number": 8, "nickname": "Old City", "distance_m": 2400.0 },
+  { "circuit_key": "baku", "turn_number": 16, "nickname": "Main Straight Entry", "distance_m": 4200.0 },
+
+  { "circuit_key": "sakhir", "turn_number": 1, "nickname": "Michael Schumacher Turn", "distance_m": 600.0 },
+  { "circuit_key": "sakhir", "turn_number": 1, "nickname": "Schumacher", "distance_m": 600.0 },
+  { "circuit_key": "sakhir", "turn_number": 10, "nickname": "Downhill Left", "distance_m": 3100.0 },
+
+  { "circuit_key": "hungaroring", "turn_number": 4, "nickname": "Mansell", "distance_m": 1350.0 },
+  { "circuit_key": "hungaroring", "turn_number": 6, "nickname": "Chicane", "distance_m": 1850.0 },
+  { "circuit_key": "hungaroring", "turn_number": 11, "nickname": "Alesi", "distance_m": 3150.0 },
+
+  { "circuit_key": "vegas", "turn_number": 5, "nickname": "Sphere", "distance_m": 1800.0 },
+  { "circuit_key": "vegas", "turn_number": 5, "nickname": "MSG Sphere", "distance_m": 1800.0 },
+  { "circuit_key": "vegas", "turn_number": 12, "nickname": "Strip Chicane", "distance_m": 4600.0 },
+
+  { "circuit_key": "jeddah", "turn_number": 13, "nickname": "Banked Hairpin", "distance_m": 2850.0 },
+  { "circuit_key": "jeddah", "turn_number": 27, "nickname": "Final Hairpin", "distance_m": 5900.0 },
+
+  { "circuit_key": "lusail", "turn_number": 1, "nickname": "Turn 1 Hairpin", "distance_m": 1100.0 },
+  { "circuit_key": "lusail", "turn_number": 12, "nickname": "Triple Apex", "distance_m": 3600.0 },
+
+  { "circuit_key": "yas_marina", "turn_number": 5, "nickname": "North Hairpin", "distance_m": 1600.0 },
+  { "circuit_key": "yas_marina", "turn_number": 9, "nickname": "Marsa Corner", "distance_m": 3200.0 },
+  { "circuit_key": "yas_marina", "turn_number": 12, "nickname": "Hotel Section", "distance_m": 4100.0 },
+
+  { "circuit_key": "miami", "turn_number": 7, "nickname": "Marina", "distance_m": 1800.0 },
+  { "circuit_key": "miami", "turn_number": 14, "nickname": "Turnpike Chicane", "distance_m": 3400.0 },
+  { "circuit_key": "miami", "turn_number": 17, "nickname": "South Hairpin", "distance_m": 4600.0 },
+
+  { "circuit_key": "shanghai", "turn_number": 1, "nickname": "Snail Corner", "distance_m": 450.0 },
+  { "circuit_key": "shanghai", "turn_number": 13, "nickname": "Banked Curve", "distance_m": 3700.0 },
+  { "circuit_key": "shanghai", "turn_number": 14, "nickname": "Hairpin", "distance_m": 4900.0 }
 ]

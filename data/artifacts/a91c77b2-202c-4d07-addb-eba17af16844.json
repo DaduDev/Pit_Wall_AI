@@ -1,0 +1,1 @@
+{"dataset_id": "a91c77b2-202c-4d07-addb-eba17af16844", "created_at": 1795796552.142184, "expires_at": 1795800152.142184, "metadata": {"domain": "research", "query": "2026 rules"}, "data": {"summary": "FIA 2026 rules summary.", "findings": ["-", "-   ", "\u2022 ", "- MGU-H removed", "1. 50/50 power split", "*   "], "sources": [], "grounded": 0, "provider": "ollama_fallback"}}

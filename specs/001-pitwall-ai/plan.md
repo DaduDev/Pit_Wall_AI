@@ -18,8 +18,14 @@ Build PitWall AI, a web application that answers natural-language Formula 1 ques
 - Testing: pytest, playwright
 
 **LLM Orchestration & Fallback**:
-- **Primary LLM**: `gemini-3.5-flash-lite` via Google AI Studio (`GOOGLE_API_KEY`). Configured with `thinking_level="low"` (or `"medium"` for complex queries) so multi-step tool calling does not terminate prematurely. Deprecated parameters (`temperature`, `top_p`, `top_k`) are omitted.
-- **Automatic & Manual Fallback LLM**: Local Ollama via Google ADK `LiteLlm(model="ollama_chat/<OLLAMA_MODEL>")` (default `OLLAMA_MODEL=qwen3.5:4b`, `OLLAMA_API_BASE=http://localhost:11434`). Uses `ollama_chat/` (not `ollama/`) to avoid tool-calling loops. Automatically triggered if Gemini returns HTTP 429/503 after retry, or forced manually via `.env` (`LLM_PROVIDER=ollama`) for offline development. When falling back to Ollama, conversation context is trimmed to the last 2 turns to ensure low memory usage (<8GB RAM).
+- **Primary LLM**: Configured purely via `.env` / environment (`GEMINI_API_KEY` or `GOOGLE_API_KEY`, `GEMINI_MODEL`, and optional Vertex AI vars `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`) through a unified `backend/app/llm/` client helper shared across `PitWallEngineer`, `HistoricalSQLAgent`, and `ResearchAgent`. Simple SQL generation and radio narration disable or minimize thinking (`thinking_budget=0` for Gemini 2.5 Flash models, or lowest supported `thinking_level` guarded safely per model).
+- **4-Tier Cascading Failover LLM Chain**: Independent 60s `429` circuit breakers per cloud provider (`gemini`, `groq`, `openrouter`) and environment-gated local Ollama fallback:
+  1. Gemini (primary via `GEMINI_API_KEY` / Vertex AI).
+  2. Groq OpenAI-compatible chat completions (`GROQ_BASE_URL`, `GROQ_MODEL=openai/gpt-oss-120b`, `timeout=30.0`, trimmed context for 8K TPM budget) -> `provider="groq_fallback"`.
+  3. OpenRouter OpenAI-compatible chat completions (`OPENROUTER_BASE_URL`, `OPENROUTER_MODEL=openrouter/free`, `timeout=35.0`, optional `HTTP-Referer` & `X-Title: PitWall AI` headers) -> `provider="openrouter_fallback"`.
+  4. Local Ollama over IPv4 (`OLLAMA_BASE_URL`, `OLLAMA_MODEL=qwen3.5:4b`, `"think": false`, `"keep_alive": "15m"`, `"options": {"num_ctx": 1024, "num_predict": 180, "temperature": 0.3}`, `150s` Ollama / `180s` A2A timeout) gated by `ENABLE_OLLAMA_FALLBACK` (`True` when `APP_ENV != "production"`, `False` when `APP_ENV == "production"`) -> `provider="ollama_fallback"`.
+  All provider errors are logged via `logger.warning` without leaking raw 429 JSON into UI text; SSE `trace` events and React HUD (`WebIntelligenceCard` & `TraceDrawer`) display accurate provider labels (`gemini`, `cache`, `groq_fallback`, `openrouter_fallback`, `ollama_fallback`).
+- **Research Grounding Cache**: `./data/research_cache/` stores grounded web intelligence payloads so repeat queries spend 0 API quota.
 - **Concurrency & Quota Protection**: Gemini requests are governed by an `asyncio.Semaphore(3)` + brief exponential backoff. ADK tools are designed coarse-grained (target <=2 LLM calls per question). Includes an in-memory/SQLite response cache for repeated and preset prompts.
 
 **Storage**: DuckDB (file-based, ingesting Kaggle CSVs with `\N` → NULL normalization). FastF1 persistent disk cache at `./data/fastf1_cache`.
@@ -123,33 +129,39 @@ backend/
 
 frontend/
 ├── src/
-│   ├── main.tsx                   # React entry point
-│   ├── App.tsx                    # Root layout (dark pit-wall shell)
+│   ├── main.tsx                        # React entry point
+│   ├── App.tsx                         # Single-column conversational HUD shell, slim header (+ New Session), centered feed & floating composer
 │   ├── components/
 │   │   ├── ChatPanel/
-│   │   │   ├── ChatPanel.tsx      # Left panel: chat input + message list
-│   │   │   ├── MessageBubble.tsx  # Individual message rendering
-│   │   │   ├── PresetPrompts.tsx  # Quick-start prompt buttons
-│   │   │   └── StreamingStatus.tsx # Live progress feed
+│   │   │   ├── WelcomeHero.tsx         # Empty-state hero + 2x2 starter prompt cards
+│   │   │   ├── TurnItem.tsx            # Per-turn feed item (Status -> Visual Artifact -> Prose -> Collapsible Trace)
+│   │   │   ├── MessageBubble.tsx       # User bubble & Race Engineer markdown commentary
+│   │   │   ├── ComposerBar.tsx         # Floating bottom dark pill composer (Prompts popover, textarea, mic slot, Send)
+│   │   │   ├── PresetPrompts.tsx       # Categorized quick-prompt popover menu
+│   │   │   └── StreamingStatus.tsx     # Live per-turn SSE progress pill
 │   │   ├── ChartStage/
-│   │   │   ├── ChartStage.tsx     # Right panel: Plotly chart display area
-│   │   │   ├── PlotlyChart.tsx    # react-plotly.js wrapper with dark theme
-│   │   │   └── TrackMiniMap.tsx   # GPS track mini-map for corner comparisons
+│   │   │   ├── ChartStage.tsx          # Inline turn visual renderer (Plotly, KpiCard, DataTableCard, WebIntelligenceCard, fullscreen modal)
+│   │   │   ├── PlotlyChart.tsx         # Responsive Plotly wrapper (`useResizeHandler={true}`, dark `#0B0F17`)
+│   │   │   ├── TrackMiniMap.tsx        # GPS track mini-map for corner comparisons
+│   │   │   ├── SectorSummaryBar.tsx    # Full-lap sector & speed-trap splits
+│   │   │   ├── KpiCard.tsx             # Single-row HUD KPI card
+│   │   │   ├── DataTableCard.tsx       # Multi-row HUD classification table
+│   │   │   └── WebIntelligenceCard.tsx # Research grounding / fallback summary card
 │   │   ├── EngineeringTrace/
-│   │   │   └── TraceDrawer.tsx    # Collapsible drawer showing SQL/telemetry params
+│   │   │   └── TraceDrawer.tsx         # Compact single-line toggle expanding full provenance & A2A hops
 │   │   ├── MetadataBar/
-│   │   │   └── MetadataBar.tsx    # Session/lap metadata display strip
+│   │   │   └── MetadataBar.tsx         # Session/lap/driver badges strip
 │   │   └── Auth/
-│   │       └── LoginPage.tsx      # Authentication gate
+│   │       └── LoginPage.tsx           # Authentication gate
 │   ├── hooks/
-│   │   ├── useSSEStream.ts        # SSE connection to /api/chat/stream
-│   │   └── useAuth.ts             # Authentication state management
+│   │   ├── useSSEStream.ts             # SSE connection binding per-turn chart/minimap/trace payloads
+│   │   └── useAuth.ts                  # Authentication state management
 │   ├── services/
-│   │   └── api.ts                 # API client (auth, chat endpoints)
+│   │   └── api.ts                      # API client (auth, chat endpoints)
 │   ├── types/
-│   │   └── index.ts               # Shared TypeScript interfaces
+│   │   └── index.ts                    # Shared TypeScript interfaces (`ChatMessage` with inline `chart`/`minimap`/`trace`/`status`)
 │   └── styles/
-│       └── globals.css            # Tailwind base + dark HUD custom properties
+│       └── globals.css                 # Tailwind base + dark HUD custom properties
 ├── tests/
 │   └── smoke.spec.ts              # Playwright: Plotly renders, zero console errors
 ├── index.html

@@ -1,0 +1,9 @@
+{
+  "suzuka:snake_curve": {
+    "circuit_slug": "suzuka",
+    "nickname": "snake_curve",
+    "turn_number": 4,
+    "distance_m": 0.0,
+    "source": "web_verified"
+  }
+}

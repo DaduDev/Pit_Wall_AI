@@ -113,19 +113,40 @@ data: {"content": "Verstappen brakes 12 meters later than Leclerc into Eau Rouge
 When `done: true`, the text stream is complete.
 
 #### Event: `chart`
-Emitted when a Plotly visualization is ready. Contains a complete Plotly JSON figure.
+Emitted when a visualization or structured HUD card is ready. Always preserves top-level `viz_type`.
 ```
 event: chart
 data: {
   "chart_id": "string",
-  "chart_type": "corner_comparison | full_lap | stint_degradation | position_evolution | historical | adhoc",
+  "viz_type": "corner_telemetry | full_lap | tyre_stints | historical_sql | kpi_card | data_table | web_intelligence_card",
+  "chart_type": "corner_comparison | full_lap_comparison | tyre_degradation | historical_sql | kpi_card | data_table | web_intelligence_card",
   "title": "Speed Comparison: VER vs LEC — Eau Rouge (2023 Belgian GP Q)",
-  "plotly_json": { <complete Plotly figure JSON> },
+  "caption": "string",
+  "spec": { <Plotly figure JSON, KPI card spec, Data Table spec, or Web Intelligence card spec> },
+  "figure": { <Plotly figure JSON when applicable> },
+  "kpi_card": {
+    "subtitle": "2021 Brazilian Grand Prix",
+    "metrics": [{"label": "Winner", "value": "Lewis Hamilton"}]
+  },
+  "data_table": {
+    "subtitle": "string",
+    "columns": ["..."],
+    "rows": [{"...": "..."}]
+  },
+  "web_intelligence_card": {
+    "title": "string",
+    "summary": "string",
+    "bullets": ["..."],
+    "sources": [{"title": "string", "url": "string"}]
+  },
   "metadata": {
     "grand_prix": "Belgian Grand Prix",
     "year": 2023,
     "session": "Qualifying",
     "drivers": ["VER", "LEC"],
+    "driver_1_lap_time": "1:12.000 (optional for full_lap)",
+    "driver_2_lap_time": "1:12.000 (optional for full_lap)",
+    "faster_driver": "RUS (optional for full_lap)",
     "laps": [1, 1],
     "compounds": ["SOFT", "SOFT"],
     "weather": "Dry"
@@ -138,8 +159,13 @@ Emitted with provenance data for the Engineering Trace panel.
 ```
 event: trace
 data: {
-  "domain": "historical_sql | telemetry | hybrid",
-  "sql_query": "SELECT ... FROM v_race_results WHERE ...",
+  "data_domain": "historical | telemetry | research | mixed",
+  "provider": "gemini | ollama_fallback | cache",
+  "query": "SELECT ... FROM v_race_results WHERE ...",
+  "dataset_id": "uuid-string",
+  "a2a_hops": [ ... ],
+  "grounding_sources": [{"title": "string", "url": "string"}],
+  "grounded": true,
   "telemetry_params": {
     "year": 2023,
     "grand_prix": "Belgian Grand Prix",
