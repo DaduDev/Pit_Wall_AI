@@ -108,11 +108,15 @@ def load_cached_fixture_lap(
     year: int = 2024,
 ) -> Optional[Dict[str, Any]]:
     """
-    Loads verified fixture data from data/fastf1_cache/fixture_2024_silverstone_q.json
+    Loads verified fixture data from runtime FastF1 cache or seeded data/fastf1_cache/fixture_2024_silverstone_q.json
     when FastF1 requires unauthenticated live timing or in offline testing.
     """
-    fixture_path = settings.FASTF1_CACHE_DIR / "fixture_2024_silverstone_q.json"
-    if not fixture_path.exists():
+    candidate_paths = [
+        settings.get_fastf1_cache_dir() / "fixture_2024_silverstone_q.json",
+        settings.FASTF1_CACHE_DIR / "fixture_2024_silverstone_q.json",
+    ]
+    fixture_path = next((p for p in candidate_paths if p.exists()), None)
+    if fixture_path is None:
         return None
 
     try:

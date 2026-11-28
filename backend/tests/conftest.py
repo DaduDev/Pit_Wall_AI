@@ -37,8 +37,12 @@ def protect_gemini_search_quota(monkeypatch):
         return
 
     import backend.app.llm.failover_client as fc
+    from backend.app.cache import get_query_cache
+    from backend.app.chat.router import rate_limiter
 
     fc.reset_gemini_cooldown()
+    get_query_cache().clear()
+    rate_limiter.reset()
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("APP_ENV", raising=False)

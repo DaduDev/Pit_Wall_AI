@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { ChatMessage, EngineeringTrace, PlotlySpec } from '../types';
+import { apiUrl } from '../services/api';
 
 interface UseSSEStreamReturn {
   messages: ChatMessage[];
@@ -183,7 +184,7 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
           headers['Authorization'] = `Bearer ${token}`;
         }
 
-        const res = await fetch('/api/chat/stream', {
+        const res = await fetch(apiUrl('/api/chat/stream'), {
           method: 'POST',
           headers,
           body: JSON.stringify({
@@ -194,7 +195,9 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
         });
 
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}: Failed to initiate stream`);
+          const errBody = await res.json().catch(() => ({}));
+          const detail = errBody?.detail || `HTTP ${res.status}: Failed to initiate stream`;
+          throw new Error(detail);
         }
 
         const reader = res.body?.getReader();

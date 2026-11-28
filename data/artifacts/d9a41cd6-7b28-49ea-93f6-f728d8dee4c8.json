@@ -1,1 +1,0 @@
-{"dataset_id": "d9a41cd6-7b28-49ea-93f6-f728d8dee4c8", "created_at": 1795841913.4477012, "expires_at": 1795845513.4477012, "metadata": {"domain": "research", "query": "Test query"}, "data": {"summary": "Summary text.", "findings": ["Bullet fact"], "sources": [], "grounded": 1, "provider": "cache"}}

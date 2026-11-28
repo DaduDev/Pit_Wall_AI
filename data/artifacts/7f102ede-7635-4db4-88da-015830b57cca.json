@@ -1,0 +1,1 @@
+{"dataset_id": "7f102ede-7635-4db4-88da-015830b57cca", "created_at": 1795849423.5796316, "expires_at": 1795851223.5796316, "metadata": {"domain": "research", "query": "Test query"}, "data": {"summary": "Summary text.", "findings": ["Bullet fact"], "sources": [], "grounded": 1, "provider": "gemini"}}

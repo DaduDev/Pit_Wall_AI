@@ -36,6 +36,7 @@ from backend.app.agent.prompts.system import RACE_ENGINEER_SYSTEM_PROMPT
 from backend.app.a2a.client import A2AClient, get_a2a_client
 from backend.app.chat.session import ConversationSession
 from backend.app.chat.streaming import (
+    sse_message,
     format_status_event,
     format_text_event,
     format_chart_event,
@@ -43,6 +44,7 @@ from backend.app.chat.streaming import (
     format_error_event,
     format_done_event,
 )
+from backend.app.cache import get_query_cache, normalize_query_key
 
 logger = logging.getLogger("pitwall.orchestrator")
 
@@ -865,6 +867,87 @@ class RaceEngineerOrchestrator:
         return None
 
     async def stream_query(
+        self,
+        user_message: str,
+        session: ConversationSession,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Read-through / write-through QueryResponseCache wrapper around _execute_stream_query.
+        Repeat standalone queries return cached trace/charts/text with 0 LLM calls.
+        """
+        t_start = time.perf_counter()
+        has_prior_turns = bool(getattr(session, "turns", None))
+        qcache_key = normalize_query_key(user_message, has_prior_turns=has_prior_turns)
+
+        if qcache_key:
+            cached = get_query_cache().get(qcache_key)
+            if cached:
+                cached_text = cached.get("text", "") or ""
+                session.add_user_message(user_message)
+                session.add_assistant_message(cached_text)
+                yield format_status_event("cached_response", "Retrieving verified pit-wall analysis from cache...")
+                if cached.get("trace"):
+                    yield sse_message("trace", {**cached["trace"], "provider": "cache"})
+                for chart_payload in cached.get("charts", []):
+                    yield sse_message("chart", chart_payload)
+                yield format_status_event("analyzing_results", "Cache hit — Engineer delivering debrief...")
+                words = cached_text.split(" ")
+                for i in range(0, len(words), 3):
+                    chunk = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
+                    yield format_text_event(chunk)
+                    await asyncio.sleep(0.01)
+                elapsed_ms = int((time.perf_counter() - t_start) * 1000)
+                yield format_done_event(elapsed_ms)
+                return
+
+        captured_trace: Optional[Dict[str, Any]] = None
+        captured_charts: List[Dict[str, Any]] = []
+        captured_text_parts: List[str] = []
+        saw_error = False
+
+        async for frame in self._execute_stream_query(user_message, session):
+            if qcache_key:
+                try:
+                    lines = frame.strip().split("\n")
+                    ev_type = ""
+                    data_str = ""
+                    for line in lines:
+                        if line.startswith("event: "):
+                            ev_type = line[7:].strip()
+                        elif line.startswith("data: "):
+                            data_str = line[6:].strip()
+                    if data_str:
+                        parsed = json.loads(data_str)
+                        if ev_type == "trace":
+                            captured_trace = parsed
+                        elif ev_type == "chart":
+                            captured_charts.append(parsed)
+                        elif ev_type == "text":
+                            captured_text_parts.append(parsed.get("delta", ""))
+                        elif ev_type == "error":
+                            saw_error = True
+                except Exception:
+                    pass
+            yield frame
+
+        full_text = "".join(captured_text_parts)
+        if (
+            qcache_key
+            and not saw_error
+            and captured_charts
+            and full_text.strip()
+            and not full_text.lstrip().startswith("⚠️")
+        ):
+            get_query_cache().set(
+                qcache_key,
+                {
+                    "trace": captured_trace,
+                    "charts": captured_charts,
+                    "text": full_text,
+                },
+            )
+
+    async def _execute_stream_query(
         self,
         user_message: str,
         session: ConversationSession,

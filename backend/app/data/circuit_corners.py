@@ -204,9 +204,13 @@ class CircuitCornerEngine:
                 resp = client.get(url, headers={"User-Agent": "PitWallAI/1.0"})
                 if resp.status_code == 200:
                     data = resp.json()
-                    with self._lock:
-                        with open(cache_file, "w", encoding="utf-8") as f:
-                            json.dump(data, f)
+                    try:
+                        with self._lock:
+                            self.cache_dir.mkdir(parents=True, exist_ok=True)
+                            with open(cache_file, "w", encoding="utf-8") as f:
+                                json.dump(data, f)
+                    except Exception as ce:
+                        logger.warning(f"Could not persist circuit geometry cache {cache_file}: {ce}")
                     return data
                 logger.warning(f"MultiViewer API returned {resp.status_code} for circuit {circuit_key}/{year}")
         except Exception as e:

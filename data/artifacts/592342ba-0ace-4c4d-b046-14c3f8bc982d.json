@@ -1,0 +1,1 @@
+{"dataset_id": "592342ba-0ace-4c4d-b046-14c3f8bc982d", "created_at": 1795849424.3919866, "expires_at": 1795851224.3919866, "metadata": {"domain": "research", "query": "Test query"}, "data": {"summary": "Summary text.", "findings": ["Bullet fact"], "sources": [], "grounded": 0, "provider": "openrouter_fallback"}}

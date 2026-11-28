@@ -1,6 +1,7 @@
+import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 # Suppress remote model cost map download in litellm
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
@@ -22,12 +23,12 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     PORT: int = 8000
     HOST: str = "0.0.0.0"
-    CORS_ORIGINS: list[str] = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://localhost:8000"
-    ]
+    CORS_ORIGINS: str = Field(default="http://localhost:5173,http://127.0.0.1:5173")
+
+    # Cloud Caching & Rate Limiting
+    CACHE_DIR: str = Field(default="")
+    REDIS_URL: Optional[str] = Field(default=None)
+    RATE_LIMIT_PER_MIN: int = Field(default=15)
 
     # LLM Settings (ADK Orchestrator & 4-Tier Cascading Failover Client)
     GOOGLE_API_KEY: str = Field(default="")
@@ -56,12 +57,6 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = Field(default="http://127.0.0.1:11434/api/chat")
     SEMAPHORE_CONCURRENCY: int = 3
 
-    @model_validator(mode="after")
-    def _resolve_ollama_fallback_default(self) -> "Settings":
-        if self.ENABLE_OLLAMA_FALLBACK is None:
-            self.ENABLE_OLLAMA_FALLBACK = self.APP_ENV.strip().lower() != "production"
-        return self
-
     # Authentication & Security
     JWT_SECRET: str = Field(default="pitwall-secret-key-change-in-production-f1-race-engineer")
     JWT_ALGORITHM: str = "HS256"
@@ -77,14 +72,67 @@ class Settings(BaseSettings):
     RESEARCH_CACHE_DIR: Path = ROOT_DIR / "data" / "research_cache"
     CORNER_NICKNAMES_PATH: Path = ROOT_DIR / "data" / "corner_nicknames.json"
 
+    @model_validator(mode="after")
+    def _resolve_runtime_defaults(self) -> "Settings":
+        env_norm = (self.APP_ENV or "local").strip().lower()
+        if self.ENABLE_OLLAMA_FALLBACK is None:
+            self.ENABLE_OLLAMA_FALLBACK = env_norm != "production"
+        if not (self.CACHE_DIR or "").strip():
+            self.CACHE_DIR = "/tmp/pitwall_cache" if env_norm == "production" else "./data"
+        return self
+
+    def get_cors_origins(self) -> List[str]:
+        """Parse comma-separated or JSON-array CORS_ORIGINS into a clean list of origins."""
+        raw = (self.CORS_ORIGINS or "").strip()
+        if not raw:
+            return ["http://localhost:5173", "http://127.0.0.1:5173"]
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(o).strip() for o in parsed if str(o).strip()]
+            except Exception:
+                pass
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+    def get_cache_root(self) -> Path:
+        """Return configured writable runtime cache directory."""
+        raw = os.environ.get("CACHE_DIR") or self.CACHE_DIR
+        if not (raw or "").strip():
+            env_norm = (os.environ.get("APP_ENV") or self.APP_ENV or "local").strip().lower()
+            raw = "/tmp/pitwall_cache" if env_norm == "production" else "./data"
+        return Path(raw)
+
+    def get_fastf1_cache_dir(self) -> Path:
+        """Return writable runtime FastF1 cache directory ({CACHE_DIR}/fastf1)."""
+        return self.get_cache_root() / "fastf1"
+
+    def get_research_runtime_cache_dir(self) -> Path:
+        """Return writable runtime research cache directory ({CACHE_DIR}/research_cache)."""
+        return self.get_cache_root() / "research_cache"
+
+    def get_artifact_cache_dir(self) -> Path:
+        """Return writable runtime ArtifactStore directory ({CACHE_DIR}/artifacts)."""
+        return self.get_cache_root() / "artifacts"
+
 
 settings = Settings()
 
-# Ensure directories exist
-settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
-settings.FASTF1_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-settings.OPENF1_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-settings.RESEARCH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# Best-effort directory creation (never crash on read-only containers)
+for _dir in (
+    settings.DATA_DIR,
+    settings.FASTF1_CACHE_DIR,
+    settings.OPENF1_CACHE_DIR,
+    settings.RESEARCH_CACHE_DIR,
+    settings.get_cache_root(),
+    settings.get_fastf1_cache_dir(),
+    settings.get_research_runtime_cache_dir(),
+    settings.get_artifact_cache_dir(),
+):
+    try:
+        _dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
 
 
 def build_thinking_config(model_name: str, preferred_level: Optional[str] = None):
