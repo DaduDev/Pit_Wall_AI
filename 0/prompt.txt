@@ -1,0 +1,50 @@
+Follow our `.specify` spec-driven workflow (update `.specify/` spec, plan, and tasks FIRST, then implement sequentially without spawning parallel subagents):
+
+Upgrade `backend/app/llm/failover_client.py` and `backend/app/config.py` to a 4-tier cascading failover chain (Gemini -> Groq -> OpenRouter -> Local Ollama):
+
+1. Configuration (`backend/app/config.py`):
+   - Add env-driven settings:
+     * `APP_ENV: str = Field(default="local")` (`"local"` | `"production"`)
+     * `ENABLE_OLLAMA_FALLBACK: Optional[bool] = Field(default=None)` (defaults to `True` when `APP_ENV != "production"`, `False` when `APP_ENV == "production"`)
+     * `GROQ_API_KEY: Optional[str] = Field(default=None)`
+     * `GROQ_BASE_URL: str = Field(default="https://api.groq.com/openai/v1")`
+     * `GROQ_MODEL: str = Field(default="openai/gpt-oss-120b")`
+     * `OPENROUTER_API_KEY: Optional[str] = Field(default=None)`
+     * `OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1")`
+     * `OPENROUTER_MODEL: str = Field(default="openrouter/free")`
+
+2. Unified OpenAI-Compatible Cloud Failover & Per-Provider Circuit Breakers (`backend/app/llm/failover_client.py`):
+   - Maintain independent 60-second `429` cooldown timers for `"gemini"`, `"groq"`, and `"openrouter"` so rate-limited providers are skipped immediately without wasted round-trips.
+   - Update BOTH `generate_with_failover` and `stream_with_failover` to execute strictly in order:
+     1) **Gemini** (primary, supports `google_search` grounding when requested) -> `provider="gemini"`
+     2) **Groq** (`POST {GROQ_BASE_URL}/chat/completions`, `timeout=30.0`, trimmed context for 8K TPM budget) when `GROQ_API_KEY` is set and not on cooldown -> `provider="groq_fallback"`
+     3) **OpenRouter** (`POST {OPENROUTER_BASE_URL}/chat/completions`, `timeout=35.0`, optional `HTTP-Referer` & `X-Title: PitWall AI` headers) when `OPENROUTER_API_KEY` is set and not on cooldown -> `provider="openrouter_fallback"`
+     4) **Local Ollama** (`qwen3.5:4b`, `num_ctx: 1024`, `num_predict: 180`, `think: False`, `timeout=150.0`) ONLY when `ENABLE_OLLAMA_FALLBACK` resolves to `True` -> `provider="ollama_fallback"`
+   - Log provider errors server-side via `logger.warning`, never leak raw JSON/429 payloads into UI bullets or chat text.
+
+3. UI Attribution (`presentation_agent.py` + `WebIntelligenceCard.tsx` + `TraceDrawer`):
+   - Display clean, honest provider labels in the Engineering Trace drawer and `WebIntelligenceCard` badge for `"gemini"` (`Google Search Grounding`), `"cache"` (`Cached Search Grounding`), `"groq_fallback"` (`Groq Cloud Fallback — No Live Search`), `"openrouter_fallback"` (`OpenRouter Free Fallback — No Live Search`), and `"ollama_fallback"` (`Local Ollama Fallback — Offline Model`).
+
+4. Verify:
+   - Add unit tests in `backend/tests/` mocking the full cascade:
+     * Gemini `429` -> Groq `200` (`provider == "groq_fallback"`)
+     * Gemini `429` + Groq `429` -> OpenRouter `200` (`provider == "openrouter_fallback"`)
+     * All cloud providers fail in `APP_ENV=local` -> Ollama runs
+     * All cloud providers fail in `APP_ENV=production` -> Ollama is skipped cleanly without probing `127.0.0.1:11434`
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
+
+---
+
+where should I keep the API keys, and with what names?
+
+---
+
+do I really need to add this as well: OPENROUTER_HTTP_REFERER, gemini gcp key's I'll add later for now I gave you a key and a model to use. For grok and openrouter I've added api key, base url and model. For ollama I've added base and model name. Let me know if you need anything more now
+
+---
+
+alright let me test and get back to you
+
+---
+
+There's just one flaw here, when a new text is being generated the screen should be automatically going down right but, it's not going like that
