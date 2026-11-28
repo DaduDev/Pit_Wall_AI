@@ -114,6 +114,10 @@ class Settings(BaseSettings):
         """Return writable runtime research cache directory ({CACHE_DIR}/research_cache)."""
         return self.get_cache_root() / "research_cache"
 
+    def get_openf1_runtime_cache_dir(self) -> Path:
+        """Return writable runtime OpenF1 cache directory ({CACHE_DIR}/openf1_cache)."""
+        return self.get_cache_root() / "openf1_cache"
+
     def get_artifact_cache_dir(self) -> Path:
         """Return writable runtime ArtifactStore directory ({CACHE_DIR}/artifacts)."""
         return self.get_cache_root() / "artifacts"
@@ -130,6 +134,7 @@ for _dir in (
     settings.get_cache_root(),
     settings.get_fastf1_cache_dir(),
     settings.get_research_runtime_cache_dir(),
+    settings.get_openf1_runtime_cache_dir(),
     settings.get_artifact_cache_dir(),
 ):
     try:

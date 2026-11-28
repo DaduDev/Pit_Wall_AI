@@ -19,8 +19,9 @@ COPY backend/ ./backend/
 COPY data/f1_data.duckdb ./data/f1_data.duckdb
 COPY data/corner_nicknames.json ./data/corner_nicknames.json
 COPY data/research_cache/ ./data/research_cache/
+COPY data/openf1_cache/ ./data/openf1_cache/
 
-RUN mkdir -p /tmp/pitwall_cache/fastf1 /tmp/pitwall_cache/research_cache /tmp/pitwall_cache/artifacts \
+RUN mkdir -p /tmp/pitwall_cache/fastf1 /tmp/pitwall_cache/research_cache /tmp/pitwall_cache/openf1_cache /tmp/pitwall_cache/artifacts \
     && chown -R 1000:1000 /app /tmp/pitwall_cache
 
 USER 1000

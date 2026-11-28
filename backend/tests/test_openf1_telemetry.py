@@ -163,3 +163,65 @@ def test_pre_2023_telemetry_era_boundary():
     assert "2023" in msg
     assert "OpenF1" in msg
     assert "Historical Analytics" in msg
+
+
+def test_openf1_401_live_session_fails_fast_with_clear_message(tmp_path, monkeypatch):
+    """
+    OpenF1 returns HTTP 401 during live F1 sessions; verify we fail fast without
+    retrying 4 times and preserve OpenF1's detail cleanly.
+    """
+    import httpx
+    from backend.app.data.openf1_client import OpenF1Client
+
+    calls = {"count": 0}
+
+    def fake_get(self, url, params=None, **kwargs):
+        calls["count"] += 1
+        return httpx.Response(
+            status_code=401,
+            request=httpx.Request("GET", url),
+            json={
+                "detail": "Live F1 session in progress. Global API access is restricted to authenticated users until the session ends."
+            },
+        )
+
+    monkeypatch.setattr(httpx.Client, "get", fake_get)
+    client = OpenF1Client(cache_dir=tmp_path, min_request_interval=0.0)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        client.get("sessions", {"year": 2024}, max_retries=3)
+
+    assert calls["count"] == 1
+    msg = str(excinfo.value)
+    assert "OpenF1 upstream API rejected unauthenticated request (HTTP 401)" in msg
+    assert "Live F1 session in progress" in msg
+
+
+def test_openf1_seeded_cache_fallback_when_runtime_cache_empty(tmp_path, monkeypatch):
+    """
+    When runtime CACHE_DIR is empty (e.g., cold Vercel container), OpenF1Client still
+    serves bundled seed files from OPENF1_CACHE_DIR without calling the network.
+    """
+    import httpx
+    from backend.app.config import settings
+    from backend.app.data.openf1_client import OpenF1Client
+
+    seed_dir = tmp_path / "seed_openf1"
+    runtime_dir = tmp_path / "runtime_openf1"
+    seed_dir.mkdir()
+    runtime_dir.mkdir()
+    (seed_dir / "sessions_year=2024.json").write_text('[{"session_key": 9586, "circuit_short_name": "Monza"}]', encoding="utf-8")
+
+    def fail_network(self, url, params=None, **kwargs):
+        raise AssertionError("Network should not be called when bundled seed cache hits")
+
+    monkeypatch.setattr(httpx.Client, "get", fail_network)
+    monkeypatch.delenv("CACHE_DIR", raising=False)
+    monkeypatch.setattr(settings, "OPENF1_CACHE_DIR", seed_dir)
+    monkeypatch.setattr(settings, "CACHE_DIR", str(tmp_path))
+
+    client = OpenF1Client(cache_dir=None, min_request_interval=0.0)
+    assert client.cache_dir == tmp_path / "openf1_cache"
+    sessions = client.get_sessions(year=2024)
+    assert len(sessions) == 1
+    assert sessions[0]["session_key"] == 9586

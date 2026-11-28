@@ -232,8 +232,13 @@ class OpenF1Client:
         min_request_interval: float = 0.42,  # ~2.38 req/s
         max_requests_per_minute: int = 28,   # Safe margin under OpenF1 30 req/min cap
     ):
-        self.cache_dir = cache_dir or settings.OPENF1_CACHE_DIR
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.seed_cache_dir = Path(settings.OPENF1_CACHE_DIR)
+        self._allow_seed_cache = cache_dir is None
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else settings.get_openf1_runtime_cache_dir()
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"OpenF1 runtime cache mkdir skipped ({self.cache_dir}): {e}")
         self.base_url = (base_url or settings.OPENF1_BASE_URL).rstrip("/")
         self.min_interval = min_request_interval
         self.max_per_minute = max_requests_per_minute
@@ -242,8 +247,14 @@ class OpenF1Client:
         self._last_request_time = 0.0
         self._request_timestamps: deque = deque()
 
-    def _get_cache_path(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Path:
+    def _get_cache_path(
+        self,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+        base_dir: Optional[Path] = None,
+    ) -> Path:
         """Generates deterministic safe filename for local JSON cache with session key isolation."""
+        target_dir = base_dir or self.cache_dir
         param_str = ""
         prefix = endpoint
         if params:
@@ -259,12 +270,12 @@ class OpenF1Client:
         else:
             h = hashlib.md5(param_str.encode("utf-8")).hexdigest()[:12]
             # Maintain backward compatibility with existing cached files
-            legacy_file = self.cache_dir / f"{endpoint}_{h}.json"
+            legacy_file = target_dir / f"{endpoint}_{h}.json"
             if legacy_file.exists():
                 return legacy_file
             filename = f"{prefix}_{h}.json"
 
-        return self.cache_dir / filename
+        return target_dir / filename
 
     def _wait_for_rate_limit(self):
         """Enforces <= 2.5 req/sec and <= 28 req/min rate limits."""
@@ -302,16 +313,23 @@ class OpenF1Client:
         """
         Executes GET request against OpenF1 API with cache-first lookup and 429 backoff retry.
         """
-        cache_path = self._get_cache_path(endpoint, params)
+        cache_path = self._get_cache_path(endpoint, params, base_dir=self.cache_dir)
 
-        # 1. Cache hit
-        if use_cache and cache_path.exists():
-            try:
-                with open(cache_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                return data
-            except Exception as e:
-                logger.warning(f"Failed to read cache file {cache_path}: {e}")
+        # 1. Cache hit (runtime writable cache first, then bundled read-only seed cache)
+        if use_cache:
+            candidate_paths = [cache_path]
+            if self._allow_seed_cache:
+                seed_path = self._get_cache_path(endpoint, params, base_dir=self.seed_cache_dir)
+                if seed_path != cache_path:
+                    candidate_paths.append(seed_path)
+            for candidate in candidate_paths:
+                if candidate.exists():
+                    try:
+                        with open(candidate, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        return data
+                    except Exception as e:
+                        logger.warning(f"Failed to read cache file {candidate}: {e}")
 
         # 2. Network fetch with rate-limiter and retry
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
@@ -328,11 +346,30 @@ class OpenF1Client:
                     data = resp.json()
                     # Cache successful response
                     try:
+                        self.cache_dir.mkdir(parents=True, exist_ok=True)
                         with open(cache_path, "w", encoding="utf-8") as f:
                             json.dump(data, f)
                     except Exception as ce:
                         logger.warning(f"Could not write cache file {cache_path}: {ce}")
                     return data
+
+                elif resp.status_code in (401, 403):
+                    detail = ""
+                    try:
+                        payload = resp.json()
+                        if isinstance(payload, dict):
+                            detail = str(payload.get("detail") or payload.get("message") or "").strip()
+                    except Exception:
+                        detail = (resp.text or "").strip()[:240]
+                    reason = (
+                        detail
+                        or "OpenF1 temporarily restricts unauthenticated telemetry access while a live F1 session is in progress."
+                    )
+                    raise RuntimeError(
+                        f"OpenF1 upstream API rejected unauthenticated request (HTTP {resp.status_code}): {reason} "
+                        "Cached telemetry sessions still work offline; please retry uncached telemetry once the live F1 session ends, "
+                        "or ask historical race/qualifying/standings questions (1950–2024+ via DuckDB) in the meantime."
+                    )
 
                 elif resp.status_code == 429:
                     retry_after = 2.0 * (2 ** attempt)
@@ -352,6 +389,8 @@ class OpenF1Client:
                 else:
                     resp.raise_for_status()
 
+            except RuntimeError:
+                raise
             except Exception as e:
                 last_err = e
                 if attempt < max_retries:
