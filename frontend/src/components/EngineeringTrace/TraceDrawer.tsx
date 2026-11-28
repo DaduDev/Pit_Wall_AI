@@ -51,14 +51,16 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
   };
 
   const getProviderLabel = () => {
-    if (trace.provider === 'ollama_fallback') return 'Ollama Fallback (qwen3.5)';
-    if (trace.provider === 'cache') return isResearch ? 'Research Disk Cache' : 'Persistent Cache';
+    if (trace.provider === 'ollama_fallback') return 'Local Ollama Fallback — Offline Model';
+    if (trace.provider === 'groq_fallback') return 'Groq Cloud Fallback — No Live Search';
+    if (trace.provider === 'openrouter_fallback') return 'OpenRouter Free Fallback — No Live Search';
+    if (trace.provider === 'cache') return 'Cached Search Grounding';
     if (trace.provider === 'gemini') {
-      if (isResearch) return 'Gemini Search Grounding';
+      if (isResearch) return 'Google Search Grounding';
       if (isTelemetry) return 'OpenF1 + Gemini';
       return 'DuckDB + Gemini';
     }
-    if (isResearch) return 'Gemini Search Grounding';
+    if (isResearch) return 'Google Search Grounding';
     if (isTelemetry) return 'OpenF1 REST API';
     return 'DuckDB Read-Only';
   };
@@ -67,6 +69,10 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
   const providerColorClass =
     providerTag === 'ollama_fallback'
       ? 'border-amber-500/30 bg-amber-950/30 text-amber-400'
+      : providerTag === 'groq_fallback'
+      ? 'border-sky-500/30 bg-sky-950/30 text-sky-300'
+      : providerTag === 'openrouter_fallback'
+      ? 'border-indigo-500/30 bg-indigo-950/30 text-indigo-300'
       : providerTag === 'cache'
       ? 'border-cyan-500/30 bg-cyan-950/30 text-cyan-400'
       : 'border-emerald-500/30 bg-emerald-950/30 text-emerald-400';
@@ -154,6 +160,10 @@ export function TraceDrawer({ trace }: TraceDrawerProps) {
                 className={`font-medium ${
                   trace.provider === 'ollama_fallback'
                     ? 'text-amber-400'
+                    : trace.provider === 'groq_fallback'
+                    ? 'text-sky-300'
+                    : trace.provider === 'openrouter_fallback'
+                    ? 'text-indigo-300'
                     : trace.provider === 'cache'
                     ? 'text-cyan-400'
                     : 'text-white'

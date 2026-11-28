@@ -23,7 +23,11 @@ from google.adk.agents.llm_agent import LlmAgent
 from a2a.types import AgentCard, AgentSkill, AgentInterface
 
 from backend.app.config import settings
-from backend.app.llm import generate_with_failover, get_gemini_config
+from backend.app.llm import (
+    generate_with_failover,
+    get_gemini_config,
+    is_ollama_fallback_enabled,
+)
 from backend.app.a2a.artifact_store import get_artifact_store
 from backend.app.data.circuit_corners import get_circuit_corner_engine
 
@@ -203,25 +207,34 @@ class ResearchAgent:
                         },
                     )
             elif llm_res.text:
-                # Step 3: Local Ollama Fallback succeeded
+                # Step 3: Cloud (Groq / OpenRouter) or Local Ollama Fallback succeeded
                 summary = sanitize_summary_text(llm_res.text)
                 findings = _extract_clean_bullets(summary)
                 sources = []
                 is_grounded = False
-                provider = "ollama_fallback"
+                provider = llm_res.provider or "ollama_fallback"
             else:
-                # Step 4: Both Gemini and local Ollama are unreachable -> clean user notice
+                # Step 4: All enabled providers are unreachable -> clean user notice
+                ollama_on = is_ollama_fallback_enabled()
                 summary = (
-                    f"Live web search and the local fallback model are temporarily unavailable for '{query}'. "
-                    f"Please retry shortly or ensure local Ollama is running."
+                    f"Live web search and fallback models are temporarily unavailable for '{query}'. "
+                    + (
+                        "Please retry shortly or ensure local Ollama is running."
+                        if ollama_on
+                        else "Please retry shortly."
+                    )
                 )
                 findings = [
                     "Live web grounding is temporarily rate-limited or offline.",
-                    "Local Ollama fallback model could not be reached at this moment.",
+                    (
+                        "Cloud and local Ollama fallback models could not be reached at this moment."
+                        if ollama_on
+                        else "Configured fallback providers could not be reached at this moment."
+                    ),
                 ]
                 sources = []
                 is_grounded = False
-                provider = "ollama_fallback"
+                provider = llm_res.provider or ("ollama_fallback" if ollama_on else "gemini")
 
         exec_time = round((time.perf_counter() - t_start) * 1000, 2)
 
@@ -271,7 +284,11 @@ class ResearchAgent:
                 "query": query,
                 "sources_count": len(sources),
                 "provider": provider,
-                "grounding_provider": "gemini_google_search" if is_grounded else ("cache" if provider == "cache" else "ollama_fallback"),
+                "grounding_provider": (
+                    "cache"
+                    if provider == "cache"
+                    else ("gemini_google_search" if is_grounded else provider)
+                ),
             },
         }
 

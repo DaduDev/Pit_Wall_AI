@@ -53,9 +53,14 @@ export function WebIntelligenceCard({ card }: WebIntelligenceCardProps) {
           </div>
         </div>
 
-        {/* Google Search Grounding / Ollama Fallback Badge */}
+        {/* Provider Grounding / Fallback Badge */}
         <div className="flex items-center space-x-2">
-          {isGrounded ? (
+          {card.provider === 'cache' || (isGrounded && card.provider === 'cache') ? (
+            <div className="flex items-center space-x-1.5 rounded-full border border-cyan-500/30 bg-cyan-950/40 px-3 py-1 text-xs font-mono text-cyan-400">
+              <Sparkles className="h-3 w-3 text-cyan-400" />
+              <span>Cached Search Grounding</span>
+            </div>
+          ) : isGrounded ? (
             <div className="flex items-center space-x-1.5 rounded-full border border-emerald-500/30 bg-emerald-950/40 px-3 py-1 text-xs font-mono text-emerald-400">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -64,10 +69,20 @@ export function WebIntelligenceCard({ card }: WebIntelligenceCardProps) {
               <Sparkles className="h-3 w-3 text-emerald-400" />
               <span>Google Search Grounding</span>
             </div>
+          ) : card.provider === 'groq_fallback' ? (
+            <div className="flex items-center space-x-1.5 rounded-full border border-sky-500/30 bg-sky-950/40 px-3 py-1 text-xs font-mono text-sky-300">
+              <ShieldCheck className="h-3 w-3 text-sky-400" />
+              <span>Groq Cloud Fallback — No Live Search</span>
+            </div>
+          ) : card.provider === 'openrouter_fallback' ? (
+            <div className="flex items-center space-x-1.5 rounded-full border border-indigo-500/30 bg-indigo-950/40 px-3 py-1 text-xs font-mono text-indigo-300">
+              <ShieldCheck className="h-3 w-3 text-indigo-400" />
+              <span>OpenRouter Free Fallback — No Live Search</span>
+            </div>
           ) : (
             <div className="flex items-center space-x-1.5 rounded-full border border-amber-500/30 bg-amber-950/40 px-3 py-1 text-xs font-mono text-amber-400">
               <ShieldCheck className="h-3 w-3" />
-              <span>Local Ollama Fallback (Offline Model)</span>
+              <span>Local Ollama Fallback — Offline Model</span>
             </div>
           )}
         </div>

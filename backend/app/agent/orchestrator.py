@@ -901,14 +901,16 @@ class RaceEngineerOrchestrator:
                         or res_research.get("provider")
                         or ("gemini" if res_research.get("grounded") else "ollama_fallback")
                     )
-                    research_notes = (
-                        "Served from local grounded research cache."
-                        if research_provider == "cache"
-                        else (
-                            "Verified via ResearchAgent with Google Search Grounding."
-                            if res_research.get("grounded")
-                            else "Generated via local Ollama fallback (offline model)."
-                        )
+                    research_notes_map = {
+                        "cache": "Cached Search Grounding.",
+                        "gemini": "Verified via ResearchAgent with Google Search Grounding.",
+                        "groq_fallback": "Generated via Groq Cloud Fallback — No Live Search.",
+                        "openrouter_fallback": "Generated via OpenRouter Free Fallback — No Live Search.",
+                        "ollama_fallback": "Generated via Local Ollama Fallback — Offline Model.",
+                    }
+                    research_notes = research_notes_map.get(
+                        research_provider,
+                        "Verified via ResearchAgent." if res_research.get("grounded") else "Generated via fallback model (no live search).",
                     )
                     trace_payload = {
                         "data_domain": "research",

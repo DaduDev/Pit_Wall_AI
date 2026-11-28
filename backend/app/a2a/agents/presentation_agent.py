@@ -405,6 +405,7 @@ class PresentationAgent:
                 })
 
             from backend.app.a2a.agents.research_agent import sanitize_bullets, sanitize_summary_text
+            from backend.app.llm import PROVIDER_LABELS
 
             raw_bullets = data.get("findings", []) if isinstance(data, dict) else []
             bullets = sanitize_bullets(raw_bullets)
@@ -416,6 +417,7 @@ class PresentationAgent:
                 if isinstance(data, dict) and data.get("provider")
                 else ("gemini" if is_grounded else "ollama_fallback")
             )
+            provider_label = PROVIDER_LABELS.get(provider, PROVIDER_LABELS["ollama_fallback"])
 
             card_payload = {
                 "title": artifact_meta.get("query", user_query) or "Web Intelligence",
@@ -424,6 +426,7 @@ class PresentationAgent:
                 "sources": formatted_sources,
                 "grounded": is_grounded,
                 "provider": provider,
+                "provider_label": provider_label,
             }
 
             spec = VizSpec(

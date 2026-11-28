@@ -36,13 +36,22 @@ export interface WebSource {
   url: string;
 }
 
+export type LLMProviderId =
+  | 'gemini'
+  | 'cache'
+  | 'groq_fallback'
+  | 'openrouter_fallback'
+  | 'ollama_fallback'
+  | string;
+
 export interface WebIntelligenceCardData {
   title: string;
   summary: string;
   bullets?: string[];
   sources: WebSource[];
   grounded?: boolean;
-  provider?: 'gemini' | 'ollama_fallback' | 'cache' | string;
+  provider?: LLMProviderId;
+  provider_label?: string;
 }
 
 export interface KpiMetric {
@@ -70,7 +79,7 @@ export interface EngineeringTrace {
   a2a_hops?: A2AHop[];
   grounding_sources?: WebSource[];
   grounded?: boolean;
-  provider?: 'gemini' | 'ollama_fallback' | 'cache' | string;
+  provider?: LLMProviderId;
   telemetry_params?: {
     year?: number;
     grand_prix?: string;

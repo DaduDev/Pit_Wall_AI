@@ -332,3 +332,305 @@ def test_presentation_agent_strips_blank_and_prefixed_bullets():
     card = viz["web_intelligence_card"]
     assert card["bullets"] == ["Live web grounding info", "50/50 power split"]
     assert card["summary"] == "FIA 2026 rules summary."
+
+
+def test_cascade_gemini_429_to_groq_200(monkeypatch):
+    """Gemini 429 fails over cleanly to Tier 2 Groq (30s timeout, trimmed prompt) -> provider='groq_fallback'."""
+    fc.reset_provider_cooldown()
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test_key")
+    monkeypatch.setenv("APP_ENV", "local")
+
+    def _gem_429(*args, **kwargs):
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    calls = []
+
+    class _FakeResp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    def _fake_post(url, *, headers=None, json=None, timeout=None):
+        calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
+        return _FakeResp({"choices": [{"message": {"content": "Groq pit-wall summary."}}]})
+
+    monkeypatch.setattr(fc, "_call_gemini_sync", _gem_429)
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    long_prompt = "Context\n" + ("X" * 16000) + "\nQuestion: Who won?"
+    res = fc.generate_with_failover(long_prompt, system_instruction="Be concise.")
+
+    assert res.provider == "groq_fallback"
+    assert res.text == "Groq pit-wall summary."
+    assert len(calls) == 1
+    assert calls[0]["url"] == "https://api.groq.com/openai/v1/chat/completions"
+    assert calls[0]["headers"]["Authorization"] == "Bearer gsk_test_key"
+    assert calls[0]["json"]["model"] == "openai/gpt-oss-120b"
+    assert isinstance(calls[0]["timeout"], httpx.Timeout)
+    assert calls[0]["timeout"].read == 30.0
+    assert len(calls[0]["json"]["messages"][-1]["content"]) <= fc.GROQ_MAX_PROMPT_CHARS + 64
+    assert fc.is_provider_in_cooldown("gemini") is True
+    assert fc.is_provider_in_cooldown("groq") is False
+
+
+def test_cascade_gemini_429_groq_429_to_openrouter_200(monkeypatch):
+    """Gemini 429 + Groq 429 fails over cleanly to Tier 3 OpenRouter (35s timeout) and sets both cooldowns."""
+    fc.reset_provider_cooldown()
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test_key")
+    monkeypatch.setenv("OPENROUTER_HTTP_REFERER", "https://pitwall.example.com")
+    monkeypatch.setenv("APP_ENV", "local")
+
+    gemini_calls = {"count": 0}
+
+    def _gem_429(*args, **kwargs):
+        gemini_calls["count"] += 1
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    post_urls = []
+
+    class _Fake429Resp:
+        status_code = 429
+
+        def raise_for_status(self):
+            req = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+            raise httpx.HTTPStatusError("429 Too Many Requests", request=req, response=self)
+
+    class _FakeOpenRouterResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "OpenRouter free summary."}}]}
+
+    captured_or = {}
+
+    def _fake_post(url, *, headers=None, json=None, timeout=None):
+        post_urls.append(url)
+        if "groq.com" in url:
+            return _Fake429Resp()
+        captured_or["headers"] = headers
+        captured_or["json"] = json
+        captured_or["timeout"] = timeout
+        return _FakeOpenRouterResp()
+
+    monkeypatch.setattr(fc, "_call_gemini_sync", _gem_429)
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    res1 = fc.generate_with_failover("Summarize Monza 2024")
+    assert res1.provider == "openrouter_fallback"
+    assert res1.text == "OpenRouter free summary."
+    assert post_urls == [
+        "https://api.groq.com/openai/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
+    ]
+    assert captured_or["headers"]["X-Title"] == "PitWall AI"
+    assert captured_or["headers"]["HTTP-Referer"] == "https://pitwall.example.com"
+    assert captured_or["json"]["model"] == "openrouter/free"
+    assert captured_or["timeout"].read == 35.0
+    assert fc.is_provider_in_cooldown("gemini") is True
+    assert fc.is_provider_in_cooldown("groq") is True
+    assert fc.is_provider_in_cooldown("openrouter") is False
+
+    # Second call in 60s window skips Gemini AND Groq immediately, calling OpenRouter directly
+    res2 = fc.generate_with_failover("Second query during cooldown")
+    assert res2.provider == "openrouter_fallback"
+    assert gemini_calls["count"] == 1
+    assert post_urls == [
+        "https://api.groq.com/openai/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
+    ]
+
+
+def test_cascade_all_cloud_fail_local_runs_ollama(monkeypatch):
+    """When all cloud providers fail with APP_ENV=local, Tier 4 Ollama runs cleanly."""
+    from backend.app.config import Settings
+
+    assert Settings(_env_file=None, APP_ENV="local").ENABLE_OLLAMA_FALLBACK is True
+
+    fc.reset_provider_cooldown()
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test_key")
+
+    monkeypatch.setattr(fc, "_call_gemini_sync", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("429 RESOURCE_EXHAUSTED")))
+
+    called_urls = []
+
+    class _FakeOkOllama:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"message": {"content": "Local Ollama response."}}
+
+    def _fake_post(url, *, headers=None, json=None, timeout=None):
+        called_urls.append(url)
+        if "11434" in url:
+            return _FakeOkOllama()
+        raise httpx.ConnectError("cloud down")
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    res = fc.generate_with_failover("Test local fallback")
+    assert res.provider == "ollama_fallback"
+    assert res.text == "Local Ollama response."
+    assert called_urls == [
+        "https://api.groq.com/openai/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
+        "http://127.0.0.1:11434/api/chat",
+    ]
+
+
+def test_cascade_all_cloud_fail_production_skips_ollama(tmp_path, monkeypatch):
+    """When all cloud providers fail with APP_ENV=production, Tier 4 Ollama is skipped cleanly without probing 127.0.0.1:11434."""
+    from backend.app.config import Settings
+
+    assert Settings(_env_file=None, APP_ENV="production").ENABLE_OLLAMA_FALLBACK is False
+    assert Settings(_env_file=None, APP_ENV="production", ENABLE_OLLAMA_FALLBACK=True).ENABLE_OLLAMA_FALLBACK is True
+
+    fc.reset_provider_cooldown()
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test_key")
+
+    monkeypatch.setattr(fc, "_call_gemini_sync", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("429 RESOURCE_EXHAUSTED")))
+
+    called_urls = []
+
+    def _fake_post(url, *, headers=None, json=None, timeout=None):
+        called_urls.append(url)
+        raise RuntimeError(f"429 rate limit at {url}")
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    agent = ResearchAgent(cache_dir=tmp_path)
+    res = agent.research_topic("2026 F1 chassis weight rules")
+
+    assert called_urls == [
+        "https://api.groq.com/openai/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
+    ]
+    assert all("127.0.0.1" not in u and "11434" not in u for u in called_urls)
+    assert res["grounded"] is False
+    assert "429" not in res["summary"]
+    assert "RESOURCE_EXHAUSTED" not in res["summary"]
+    assert "ollama" not in res["summary"].lower()
+
+
+def test_stream_cascade_gemini_to_groq_to_openrouter(monkeypatch):
+    """stream_with_failover cascades Gemini -> Groq 429 -> OpenRouter SSE cleanly and skips Ollama in production."""
+    fc.reset_provider_cooldown()
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test_key")
+
+    class _FailingClient:
+        class aio:
+            class models:
+                @staticmethod
+                async def generate_content_stream(*args, **kwargs):
+                    raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    monkeypatch.setattr(fc, "_get_genai_client", lambda cfg: _FailingClient())
+
+    stream_urls = []
+
+    class _Groq429Stream:
+        status_code = 429
+
+        def raise_for_status(self):
+            req = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+            raise httpx.HTTPStatusError("429 rate limited", request=req, response=self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _OpenRouterOkStream:
+        def raise_for_status(self):
+            return None
+
+        async def aiter_lines(self):
+            yield f"data: {json.dumps({'choices': [{'delta': {'content': 'Box box, '}}]})}"
+            yield f"data: {json.dumps({'choices': [{'delta': {'content': 'clear air ahead.'}}]})}"
+            yield "data: [DONE]"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def stream(self, method, url, **kwargs):
+            stream_urls.append(url)
+            if "groq.com" in url:
+                return _Groq429Stream()
+            return _OpenRouterOkStream()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
+
+    async def _collect():
+        state = {}
+        chunks = []
+        async for ch in fc.stream_with_failover("Status update", provider_state=state):
+            chunks.append(ch)
+        return "".join(chunks), state
+
+    text, state = asyncio.run(_collect())
+    assert text == "Box box, clear air ahead."
+    assert state["provider"] == "openrouter_fallback"
+    assert fc.is_provider_in_cooldown("groq") is True
+    assert stream_urls == [
+        "https://api.groq.com/openai/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
+    ]
+
+
+def test_presentation_agent_provider_labels():
+    """Verify PresentationAgent preserves exact honest provider labels on WebIntelligenceCard."""
+    from backend.app.a2a.artifact_store import get_artifact_store
+
+    store = get_artifact_store()
+    pa = get_presentation_agent()
+    expected = {
+        "gemini": "Google Search Grounding",
+        "cache": "Cached Search Grounding",
+        "groq_fallback": "Groq Cloud Fallback — No Live Search",
+        "openrouter_fallback": "OpenRouter Free Fallback — No Live Search",
+        "ollama_fallback": "Local Ollama Fallback — Offline Model",
+    }
+    for prov, label in expected.items():
+        ds_id = store.put(
+            data={
+                "summary": "Summary text.",
+                "findings": ["Bullet fact"],
+                "sources": [],
+                "grounded": prov in ("gemini", "cache"),
+                "provider": prov,
+            },
+            metadata={"domain": "research", "query": "Test query"},
+        )
+        viz = pa.render_visualization(dataset_id=ds_id, domain="research")
+        card = viz["web_intelligence_card"]
+        assert card["provider"] == prov
+        assert card["provider_label"] == label

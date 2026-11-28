@@ -1,0 +1,1 @@
+{"dataset_id": "3b579213-ea7a-4e18-840b-5d9baf1d68b9", "created_at": 1795841913.5113869, "expires_at": 1795845513.5113869, "metadata": {"domain": "research", "query": "Test query"}, "data": {"summary": "Summary text.", "findings": ["Bullet fact"], "sources": [], "grounded": 0, "provider": "ollama_fallback"}}

@@ -306,6 +306,18 @@
 
 ---
 
+## Phase 15: 4-Tier Cascading LLM Failover (Gemini → Groq → OpenRouter → Local Ollama)
+
+**Purpose**: Upgrade `backend/app/config.py` and `backend/app/llm/failover_client.py` to support a 4-tier cascading failover chain with independent 60s `429` circuit breakers, `APP_ENV` / `ENABLE_OLLAMA_FALLBACK` production gating, and honest provider badges in `WebIntelligenceCard` & `TraceDrawer`.
+
+- [x] T117 Add `APP_ENV`, `ENABLE_OLLAMA_FALLBACK` (auto-resolved from `APP_ENV` when `None`), `GROQ_API_KEY`, `GROQ_BASE_URL`, `GROQ_MODEL`, `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, and `OPENROUTER_MODEL` settings to `backend/app/config.py`
+- [x] T118 Upgrade `backend/app/llm/failover_client.py` (and exports in `backend/app/llm/__init__.py`) with per-provider 60s `429` cooldown circuit breakers (`"gemini"`, `"groq"`, `"openrouter"`), unified OpenAI-compatible sync & SSE streaming helpers for Groq (`timeout=30.0`, trimmed context for 8K TPM budget) and OpenRouter (`timeout=35.0`, optional `HTTP-Referer` & `X-Title: PitWall AI` headers), `APP_ENV`-gated Ollama fallback (`qwen3.5:4b`, `num_ctx: 1024`, `num_predict: 180`, `think: False`, `timeout=150.0`), and sanitized error logging across `research_agent.py` & `orchestrator.py`
+- [x] T119 Update provider attribution across `backend/app/a2a/agents/presentation_agent.py`, `frontend/src/types/index.ts`, `frontend/src/components/ChartStage/WebIntelligenceCard.tsx`, and `frontend/src/components/EngineeringTrace/TraceDrawer.tsx` to display `"Google Search Grounding"` (`gemini`), `"Cached Search Grounding"` (`cache`), `"Groq Cloud Fallback — No Live Search"` (`groq_fallback`), `"OpenRouter Free Fallback — No Live Search"` (`openrouter_fallback`), and `"Local Ollama Fallback — Offline Model"` (`ollama_fallback`)
+- [x] T120 Add unit tests in `backend/tests/test_llm_failover_and_research_cache.py` mocking the full cascade (Gemini `429` -> Groq `200`; Gemini `429` + Groq `429` -> OpenRouter `200`; all cloud fail in `APP_ENV=local` -> Ollama runs; all cloud fail in `APP_ENV=production` -> Ollama skipped cleanly without probing `127.0.0.1:11434`, plus streaming cascade & per-provider cooldown checks)
+- [x] T121 Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/` and mark Phase 15 complete
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

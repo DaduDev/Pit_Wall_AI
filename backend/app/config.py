@@ -6,7 +6,7 @@ from typing import Optional
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, model_validator
 
 # Base project directory (f1-race-engineer root)
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -17,6 +17,8 @@ class Settings(BaseSettings):
 
     # Environment & Server
     PROJECT_NAME: str = "PitWall AI"
+    APP_ENV: str = Field(default="local")  # "local" | "production"
+    ENABLE_OLLAMA_FALLBACK: Optional[bool] = Field(default=None)
     DEBUG: bool = False
     PORT: int = 8000
     HOST: str = "0.0.0.0"
@@ -27,7 +29,7 @@ class Settings(BaseSettings):
         "http://localhost:8000"
     ]
 
-    # LLM Settings (ADK Orchestrator & Unified Failover Client)
+    # LLM Settings (ADK Orchestrator & 4-Tier Cascading Failover Client)
     GOOGLE_API_KEY: str = Field(default="")
     GEMINI_API_KEY: str = Field(default="")
     GOOGLE_GENAI_USE_VERTEXAI: bool = Field(default=False)
@@ -36,10 +38,29 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = Field(default="gemini")  # "gemini" or "ollama"
     GEMINI_MODEL: str = "gemini-3.5-flash-lite"
     GEMINI_THINKING_LEVEL: str = "low"  # "low" or "medium"
+
+    # Tier 2: Groq OpenAI-Compatible Cloud Fallback
+    GROQ_API_KEY: Optional[str] = Field(default=None)
+    GROQ_BASE_URL: str = Field(default="https://api.groq.com/openai/v1")
+    GROQ_MODEL: str = Field(default="openai/gpt-oss-120b")
+
+    # Tier 3: OpenRouter OpenAI-Compatible Cloud Fallback
+    OPENROUTER_API_KEY: Optional[str] = Field(default=None)
+    OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1")
+    OPENROUTER_MODEL: str = Field(default="openrouter/free")
+    OPENROUTER_HTTP_REFERER: Optional[str] = Field(default=None)
+
+    # Tier 4: Local Ollama Offline Fallback
     OLLAMA_MODEL: str = Field(default="qwen3.5:4b")
     OLLAMA_API_BASE: str = Field(default="http://127.0.0.1:11434")
     OLLAMA_BASE_URL: str = Field(default="http://127.0.0.1:11434/api/chat")
     SEMAPHORE_CONCURRENCY: int = 3
+
+    @model_validator(mode="after")
+    def _resolve_ollama_fallback_default(self) -> "Settings":
+        if self.ENABLE_OLLAMA_FALLBACK is None:
+            self.ENABLE_OLLAMA_FALLBACK = self.APP_ENV.strip().lower() != "production"
+        return self
 
     # Authentication & Security
     JWT_SECRET: str = Field(default="pitwall-secret-key-change-in-production-f1-race-engineer")

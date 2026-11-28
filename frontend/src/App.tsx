@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { LogOut, Plus, Radio } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import { useSSEStream } from './hooks/useSSEStream';
@@ -13,27 +13,85 @@ export default function App() {
   const { messages, isStreaming, sendMessage, resetChat } = useSSEStream(token);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const feedEndRef = useRef<HTMLDivElement>(null);
+  const feedContentRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
   const prevMessageCountRef = useRef(0);
+  const isStreamingRef = useRef(isStreaming);
+  const justFinishedRef = useRef(false);
+
+  const scrollToBottom = useCallback((smooth = false) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const targetTop = el.scrollHeight - el.clientHeight;
+    if (smooth) {
+      el.scrollTo({ top: targetTop, behavior: 'smooth' });
+    } else {
+      el.scrollTop = targetTop;
+    }
+    lastScrollTopRef.current = el.scrollTop;
+  }, []);
+
+  useEffect(() => {
+    if (isStreamingRef.current && !isStreaming) {
+      // Allow a brief grace window after stream 'done' for final chart/trace layout resize
+      justFinishedRef.current = true;
+      const timer = setTimeout(() => {
+        justFinishedRef.current = false;
+      }, 600);
+      isStreamingRef.current = isStreaming;
+      if (shouldAutoScrollRef.current) {
+        requestAnimationFrame(() => scrollToBottom(false));
+      }
+      return () => clearTimeout(timer);
+    }
+    isStreamingRef.current = isStreaming;
+  }, [isStreaming, scrollToBottom]);
 
   const handleScroll = () => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    shouldAutoScrollRef.current = distanceFromBottom < 180;
+    const currentTop = el.scrollTop;
+    const distanceFromBottom = el.scrollHeight - currentTop - el.clientHeight;
+
+    // Only pause auto-scroll when the user intentionally scrolls upward
+    if (currentTop < lastScrollTopRef.current - 10 && distanceFromBottom > 80) {
+      shouldAutoScrollRef.current = false;
+    } else if (distanceFromBottom <= 80) {
+      shouldAutoScrollRef.current = true;
+    }
+    lastScrollTopRef.current = currentTop;
   };
 
+  // Scroll whenever messages update (new turn or streamed token/chart/trace)
   useEffect(() => {
-    if (messages.length > prevMessageCountRef.current) {
+    const isNewTurn = messages.length > prevMessageCountRef.current;
+    if (isNewTurn) {
       shouldAutoScrollRef.current = true;
     }
     prevMessageCountRef.current = messages.length;
 
     if (messages.length > 0 && shouldAutoScrollRef.current) {
-      feedEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      requestAnimationFrame(() => scrollToBottom(isNewTurn && !isStreaming));
     }
-  }, [messages]);
+  }, [messages, isStreaming, scrollToBottom]);
+
+  // Follow async height growth (e.g. Plotly chart / card mounting) during active turn
+  useEffect(() => {
+    const contentEl = feedContentRef.current;
+    if (!contentEl || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      if (
+        shouldAutoScrollRef.current &&
+        (isStreamingRef.current || justFinishedRef.current)
+      ) {
+        scrollToBottom(false);
+      }
+    });
+    observer.observe(contentEl);
+    return () => observer.disconnect();
+  }, [messages.length, scrollToBottom]);
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={login} isLoading={isLoading} error={error} />;
@@ -96,19 +154,21 @@ export default function App() {
       <main
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto pb-36"
+        className="flex-1 overflow-y-auto"
       >
         <ErrorBoundary fallbackTitle="PitWall Conversation Stage Error">
           {messages.length === 0 ? (
-            <div className="flex min-h-full flex-col justify-center">
+            <div className="flex min-h-full flex-col justify-center pb-32">
               <WelcomeHero onSelect={sendMessage} disabled={isStreaming} />
             </div>
           ) : (
-            <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 py-6 space-y-8">
+            <div
+              ref={feedContentRef}
+              className="mx-auto w-full max-w-5xl px-4 sm:px-6 pt-6 pb-40 space-y-8"
+            >
               {messages.map((message) => (
                 <TurnItem key={message.id} message={message} />
               ))}
-              <div ref={feedEndRef} className="h-2" />
             </div>
           )}
         </ErrorBoundary>

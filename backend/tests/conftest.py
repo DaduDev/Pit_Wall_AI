@@ -39,6 +39,12 @@ def protect_gemini_search_quota(monkeypatch):
     import backend.app.llm.failover_client as fc
 
     fc.reset_gemini_cooldown()
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("ENABLE_OLLAMA_FALLBACK", raising=False)
+    monkeypatch.setattr(settings, "GROQ_API_KEY", None, raising=False)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", None, raising=False)
     orig_call_gemini_sync = fc._call_gemini_sync
 
     def _mock_guarded_gemini_sync(
