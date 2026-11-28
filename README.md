@@ -195,7 +195,7 @@ npm run build
 
 PitWall AI is containerized for stateless, zero-cost cloud hosting:
 
-- **Backend (Hugging Face Spaces Docker or Google Cloud Run)**:
+- **Backend (Google Cloud Run)**:
   - Root `Dockerfile` builds a Python 3.11-slim image running as non-root `uid=1000` on `0.0.0.0:${PORT:-7860}`.
   - Bundles embedded read-only `data/f1_data.duckdb`, `data/corner_nicknames.json`, and seeded `data/research_cache/`.
   - Sets `APP_ENV=production` (disabling `127.0.0.1:11434` Ollama probes) and `CACHE_DIR=/tmp/pitwall_cache` for writable runtime FastF1/research/artifact caches.
