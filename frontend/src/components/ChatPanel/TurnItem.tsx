@@ -2,7 +2,6 @@ import { Loader2 } from 'lucide-react';
 import { ChatMessage } from '../../types';
 import { ChartStage } from '../ChartStage/ChartStage';
 import { MessageBubble } from './MessageBubble';
-import { TraceDrawer } from '../EngineeringTrace/TraceDrawer';
 
 interface TurnItemProps {
   message: ChatMessage;
@@ -37,9 +36,6 @@ export function TurnItem({ message }: TurnItemProps) {
 
       {/* 3) Race Engineer Text Below */}
       {showProse && <MessageBubble message={message} />}
-
-      {/* 4) Collapsible Engineering Trace Bar */}
-      {message.trace && <TraceDrawer trace={message.trace} />}
     </article>
   );
 }

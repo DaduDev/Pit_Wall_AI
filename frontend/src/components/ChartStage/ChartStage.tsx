@@ -150,7 +150,7 @@ export function ChartStage({ chart, minimap, onResetChart }: ChartStageProps) {
                   {chart.title || 'No Plottable Series Returned'}
                 </p>
                 <p className="mt-1 text-[11px] text-[#64748B] max-w-md">
-                  Numeric trace data was empty for this request. Expand the Engineering Trace below for raw query details.
+                  Numeric trace data was empty for this request. See the Race Engineer summary below for details.
                 </p>
               </div>
             ) : (

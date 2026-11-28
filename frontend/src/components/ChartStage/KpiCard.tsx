@@ -74,7 +74,7 @@ export function KpiCard({ title, card }: KpiCardProps) {
       {/* Footer note */}
       <div className="flex items-center space-x-2 border-t border-[#1E293B] pt-3 text-[11px] font-mono text-[#64748B]">
         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-        <span>Deterministic single-record lookup • Inspect SQL provenance in Engineering Trace below.</span>
+        <span>Deterministic single-record lookup verified from official race records.</span>
       </div>
     </div>
   );
