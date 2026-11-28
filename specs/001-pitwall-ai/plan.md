@@ -28,7 +28,9 @@ Build PitWall AI, a web application that answers natural-language Formula 1 ques
 - **Research Grounding Cache**: `./data/research_cache/` stores grounded web intelligence payloads so repeat queries spend 0 API quota.
 - **Concurrency & Quota Protection**: Gemini requests are governed by an `asyncio.Semaphore(3)` + brief exponential backoff. ADK tools are designed coarse-grained (target <=2 LLM calls per question). Includes an in-memory/SQLite response cache for repeated and preset prompts.
 
-**Storage**: DuckDB (file-based, ingesting Kaggle CSVs with `\N` → NULL normalization). FastF1 persistent disk cache at `./data/fastf1_cache`.
+**Storage**: Embedded read-only DuckDB (`data/f1_data.duckdb`, ingesting Kaggle CSVs with `\N` → NULL normalization). Runtime writable caches are anchored under `CACHE_DIR` (`./data` in local dev, `/tmp/pitwall_cache` in `APP_ENV=production`) covering `fastf1/`, `openf1_cache/`, `research_cache/`, and `artifacts/` (30-min TTL, 200-item cap), while `ResearchAgent` reads seeded files from `./data/research_cache/`. Repeat query responses use a read-through/write-through Query Response Cache (optional `REDIS_URL` / Upstash or in-memory 128-item TTL LRU cache).
+
+**Deployment & Networking**: Containerized via non-root `uid=1000` Python 3.11+ `Dockerfile` (uvicorn on `0.0.0.0:${PORT:-7860}` targeting Hugging Face Spaces Docker & Cloud Run), configurable `CORS_ORIGINS`, `GET /health` readiness check, SSE anti-buffering headers (`X-Accel-Buffering: no`), `asyncio.Semaphore(2)` around FastF1 `session.load()`, per-IP sliding-window `RATE_LIMIT_PER_MIN` on `POST /api/chat/stream`, and Vercel/Pages frontend (`VITE_API_URL` + `frontend/vercel.json`).
 
 **Testing**: pytest (backend unit/integration), Playwright (frontend E2E smoke tests)
 

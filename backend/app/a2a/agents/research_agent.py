@@ -97,8 +97,17 @@ class ResearchAgent:
         self.name = name
         self.artifact_store = get_artifact_store()
         self.corner_engine = get_circuit_corner_engine()
-        self.cache_dir = Path(cache_dir or getattr(settings, "RESEARCH_CACHE_DIR", Path("./data/research_cache")))
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.seed_cache_dir = Path(getattr(settings, "RESEARCH_CACHE_DIR", Path("./data/research_cache")))
+        self.cache_dir = (
+            Path(cache_dir)
+            if cache_dir is not None
+            else settings.get_research_runtime_cache_dir()
+        )
+        self._explicit_cache_dir = cache_dir is not None
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"Research runtime cache mkdir skipped ({self.cache_dir}): {e}")
         cfg = get_gemini_config()
         self.api_key = cfg.get("api_key", "")
         self.has_gemini = bool(self.api_key or cfg.get("use_vertex"))
@@ -118,36 +127,41 @@ class ResearchAgent:
             tools=tools,
         )
 
-    def _cache_path_for_query(self, query: str) -> Path:
+    def _cache_path_for_query(self, query: str, base_dir: Optional[Path] = None) -> Path:
         norm = re.sub(r"\s+", " ", query.strip().lower())
         key = hashlib.sha256(norm.encode("utf-8")).hexdigest()
-        return self.cache_dir / f"{key}.json"
+        return (base_dir or self.cache_dir) / f"{key}.json"
 
     def _read_research_cache(self, query: str) -> Optional[Dict[str, Any]]:
-        path = self._cache_path_for_query(query)
-        if not path.exists():
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict) and data.get("grounded") is True and data.get("sources"):
-                return data
-        except Exception as e:
-            logger.warning(f"Failed reading research cache {path}: {e}")
+        """Read runtime research cache first, falling back to seeded ./data/research_cache/."""
+        candidates = [self._cache_path_for_query(query, self.cache_dir)]
+        if not self._explicit_cache_dir and self.seed_cache_dir != self.cache_dir:
+            candidates.append(self._cache_path_for_query(query, self.seed_cache_dir))
+
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict) and data.get("grounded") is True and data.get("sources"):
+                    return data
+            except Exception as e:
+                logger.warning(f"Failed reading research cache {path}: {e}")
         return None
 
     def _write_research_cache(self, query: str, payload: Dict[str, Any]) -> None:
         if not payload.get("grounded") or not payload.get("sources"):
             return
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        path = self._cache_path_for_query(query)
-        tmp = path.with_suffix(".tmp")
         try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            path = self._cache_path_for_query(query, self.cache_dir)
+            tmp = path.with_suffix(".tmp")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
             tmp.replace(path)
         except Exception as e:
-            logger.warning(f"Failed writing research cache {path}: {e}")
+            logger.warning(f"Failed writing research cache ({self.cache_dir}): {e}")
 
     def research_topic(self, query: str) -> Dict[str, Any]:
         """

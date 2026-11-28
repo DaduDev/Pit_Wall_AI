@@ -318,6 +318,19 @@
 
 ---
 
+## Phase 16: $0 Cloud Deployment Hardening & Containerization
+
+**Purpose**: Prepare PitWall AI for scalable $0 cloud deployment (Vercel/Cloudflare Pages frontend + Hugging Face Spaces Docker / Cloud Run FastAPI backend with embedded read-only DuckDB).
+
+- [x] T122 Add `CORS_ORIGINS` (comma-separated string parsed cleanly), `CACHE_DIR` (`./data` local / `/tmp/pitwall_cache` production), `REDIS_URL`, and `RATE_LIMIT_PER_MIN` (`15`) to `backend/app/config.py`, update `CORSMiddleware` + `GET /health` in `backend/app/main.py`, and ensure SSE anti-buffering headers (`Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`) on `POST /api/chat/stream`
+- [x] T123 Add 30-min TTL + 200-item max cap eviction to `ArtifactStore` (`backend/app/a2a/artifact_store.py`), add read-through/write-through `QueryResponseCache` (`backend/app/cache/query_cache.py`, optional `REDIS_URL` or 128-item TTL LRU) integrated into `orchestrator.py`, guard FastF1 `session.load()` with `asyncio.Semaphore(2)` & `{CACHE_DIR}/fastf1` fallback (`backend/app/data/fastf1_cache.py`), read seeded `./data/research_cache/` while writing runtime research cache to `{CACHE_DIR}/research_cache` (`research_agent.py`), and add per-IP sliding-window rate limiting (`RATE_LIMIT_PER_MIN`) on `POST /api/chat/stream` returning HTTP 429
+- [x] T124 Update `frontend/src/services/api.ts` (and `useAuth.ts` / `useSSEStream.ts`) to resolve `API_BASE` dynamically from `import.meta.env.VITE_API_URL || "http://localhost:8000"`, and create `frontend/.env.example` + `frontend/vercel.json`
+- [x] T125 Add `redis>=5.0.0` to `backend/requirements.txt` and create root `Dockerfile` (Python 3.11+ slim, `uid=1000`, `APP_ENV=production`, `CACHE_DIR=/tmp/pitwall_cache`, uvicorn `${PORT:-7860}`) and `.dockerignore`
+- [x] T126 Create `backend/tests/test_deployment_hardening.py` testing `ArtifactStore` TTL/max-cap eviction, per-IP HTTP 429 rate limiting, Query Response Cache 0-LLM repeat hits, `X-Accel-Buffering: no` SSE header, and `APP_ENV=production` Ollama disablement
+- [x] T127 Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/` and mark Phase 16 complete
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

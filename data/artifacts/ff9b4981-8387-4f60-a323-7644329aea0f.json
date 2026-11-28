@@ -1,0 +1,1 @@
+{"dataset_id": "ff9b4981-8387-4f60-a323-7644329aea0f", "created_at": 1795849609.9118743, "expires_at": 1795851409.9118743, "metadata": {"domain": "research", "query": "Test query"}, "data": {"summary": "Summary text.", "findings": ["Bullet fact"], "sources": [], "grounded": 0, "provider": "groq_fallback"}}
