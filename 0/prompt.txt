@@ -1,0 +1,44 @@
+Follow our `.specify` spec-driven workflow (update `.specify/` spec, plan, and tasks FIRST, then implement sequentially without spawning parallel subagents):
+
+Prepare PitWall AI for scalable $0 cloud deployment (Vercel/Cloudflare Pages frontend + containerized FastAPI backend targeting Hugging Face Spaces Docker now and GCP Cloud Run later), keeping embedded read-only DuckDB as the historical analytics engine:
+
+1. Production Config, CORS & SSE Proxy Safety (`backend/app/config.py`, `backend/app/main.py`, `backend/app/chat/router.py`):
+   - Add env settings:
+     * `CORS_ORIGINS: str = Field(default="http://localhost:5173,http://127.0.0.1:5173")` (comma-separated allowed origins)
+     * `CACHE_DIR: str = Field(default="")` (resolve to `./data` when `APP_ENV != "production"` and `/tmp/pitwall_cache` when `APP_ENV == "production"`)
+     * `REDIS_URL: Optional[str] = Field(default=None)` (optional Upstash Redis TLS/REST URL)
+     * `RATE_LIMIT_PER_MIN: int = Field(default=15)`
+   - Ensure `ENABLE_OLLAMA_FALLBACK` defaults to `False` when `APP_ENV == "production"` so the container never probes `127.0.0.1:11434`.
+   - Configure FastAPI `CORSMiddleware` from `CORS_ORIGINS`.
+   - Add SSE anti-buffering headers (`Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`) to `POST /api/chat/stream`.
+   - Ensure `GET /health` returns HTTP 200 with `{ "status": "ok", "env": ..., "duckdb_ready": bool, "fastf1_cache_dir": ..., "active_providers": [...] }`.
+
+2. Scale, Memory Safety & Quota Protection (`backend/app/a2a/artifact_store.py`, `backend/app/data/fastf1_cache.py`, `backend/app/a2a/agents/research_agent.py`, `backend/app/chat/router.py`):
+   - Add 30-minute TTL eviction and a 200-item max cap to `ArtifactStore` so long-running containers never leak RAM.
+   - Add a read-through/write-through **Query Response Cache** (using `REDIS_URL` if configured, otherwise an in-memory 128-item TTL LRU cache) keyed by normalized standalone query so repeated telemetry, DuckDB SQL, and research requests return immediately without burning LLM quota or re-downloading FastF1 sessions.
+   - Wrap FastF1 `session.load()` calls in an `asyncio.Semaphore(2)` to prevent concurrent RAM spikes, and direct runtime FastF1 cache writes to `{CACHE_DIR}/fastf1` with a safe `try/except` fallback if disk writes fail.
+   - Read seeded research cache files from `./data/research_cache/` while writing new runtime entries to `{CACHE_DIR}/research_cache` inside a `try/except` guard.
+   - Add lightweight per-IP sliding-window rate limiting (`RATE_LIMIT_PER_MIN`) on `POST /api/chat/stream` returning HTTP 429 with a clean pit-wall radio notice.
+
+3. Frontend Dynamic API Base & SPA Routing (`frontend/src/`, `frontend/`):
+   - Replace any hardcoded `localhost:8000` URLs across SSE streaming, health checks, and API helpers with:
+     `const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/$/, "");`
+   - Create `frontend/.env.example` documenting `VITE_API_URL=http://localhost:8000`.
+   - Create `frontend/vercel.json` with a catch-all SPA rewrite to `/index.html`.
+
+4. Portable Backend `Dockerfile` & `.dockerignore` (repo root):
+   - Create a slim Python 3.11+ `Dockerfile` that:
+     * Installs `backend/requirements.txt` (including `redis` if used for optional `REDIS_URL`).
+     * Copies `backend/`, the read-only `.duckdb` database, and seed `./data/research_cache/`.
+     * Sets `APP_ENV=production`, `CACHE_DIR=/tmp/pitwall_cache`, and creates/switches to a non-root user (`uid=1000`, required by Hugging Face Spaces).
+     * Launches `uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-7860}`.
+   - Create `.dockerignore` excluding `.env`, `.git`, `frontend/node_modules`, `__pycache__`, `backend/tests`, and local FastF1 cache directories.
+
+5. Verification:
+   - Add unit tests in `backend/tests/test_deployment_hardening.py` verifying:
+     * `ArtifactStore` TTL and max-size eviction.
+     * Per-IP rate limiter returning HTTP 429 cleanly after exceeding limit.
+     * Query response cache serving repeat hits with zero LLM calls.
+     * `POST /api/chat/stream` including `X-Accel-Buffering: no`.
+     * `APP_ENV=production` disabling Ollama fallback.
+   - Run `python -m pytest backend/tests/ -v` and `npm run build` in `frontend/`.
