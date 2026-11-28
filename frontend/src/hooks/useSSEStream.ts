@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { ChatMessage, EngineeringTrace, PlotlySpec } from '../types';
-import { apiUrl } from '../services/api';
+import { apiUrl, getAccessToken } from '../services/api';
 
 interface UseSSEStreamReturn {
   messages: ChatMessage[];
@@ -135,7 +135,7 @@ function upsertAssistantMessage(
   return [...prev, updater(base)];
 }
 
-export function useSSEStream(token?: string | null): UseSSEStreamReturn {
+export function useSSEStream(onUnauthorized?: (message?: string) => void): UseSSEStreamReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -177,12 +177,16 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
       let accumulatedText = '';
 
       try {
+        const accessToken = await getAccessToken();
+        if (!accessToken) {
+          onUnauthorized?.('Your session has expired or is invalid. Please sign in again.');
+          return;
+        }
+
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
         };
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
 
         const res = await fetch(apiUrl('/api/chat/stream'), {
           method: 'POST',
@@ -193,6 +197,14 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
           }),
           signal: controller.signal,
         });
+
+        if (res.status === 401) {
+          const errBody = await res.json().catch(() => ({}));
+          onUnauthorized?.(
+            errBody?.detail || 'Your session has expired or is invalid. Please sign in again.'
+          );
+          return;
+        }
 
         if (!res.ok) {
           const errBody = await res.json().catch(() => ({}));
@@ -361,7 +373,7 @@ export function useSSEStream(token?: string | null): UseSSEStreamReturn {
         }
       }
     },
-    [isStreaming, sessionId, token]
+    [isStreaming, onUnauthorized, sessionId]
   );
 
   const resetChat = useCallback(() => {

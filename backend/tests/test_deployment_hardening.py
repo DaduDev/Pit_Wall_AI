@@ -170,7 +170,7 @@ def test_query_response_cache_repeat_hits_zero_llm(monkeypatch):
     assert any("event: chart" in f for f in frames2)
 
 
-def test_chat_stream_sse_headers_and_per_ip_rate_limit(monkeypatch):
+def test_chat_stream_sse_headers_and_per_ip_rate_limit(monkeypatch, auth_header):
     """POST /api/chat/stream sets X-Accel-Buffering: no and enforces per-IP sliding-window HTTP 429."""
     from backend.app.chat import router as chat_router
 
@@ -195,7 +195,7 @@ def test_chat_stream_sse_headers_and_per_ip_rate_limit(monkeypatch):
         assert isinstance(h_data["active_providers"], list)
 
         # Requests 1..3 from IP A succeed with SSE anti-buffering headers
-        headers_ip_a = {"X-Forwarded-For": "198.51.100.10"}
+        headers_ip_a = {**auth_header, "X-Forwarded-For": "198.51.100.10"}
         for _ in range(3):
             resp = client.post(
                 "/api/chat/stream",
@@ -221,11 +221,50 @@ def test_chat_stream_sse_headers_and_per_ip_rate_limit(monkeypatch):
         allowed_b = client.post(
             "/api/chat/stream",
             json={"message": "Other IP"},
-            headers={"X-Forwarded-For": "198.51.100.25"},
+            headers={**auth_header, "X-Forwarded-For": "198.51.100.25"},
         )
         assert allowed_b.status_code == 200
 
     chat_router.rate_limiter.reset()
+
+
+def test_protected_routes_enforce_auth_and_public_health_stays_open(auth_header):
+    """
+    Verify public health/status routes succeed without credentials while all chat, telemetry,
+    historical, research, viz, and profile routes reject missing, invalid, or expired tokens (401).
+    """
+    from backend.tests.conftest import make_test_supabase_jwt
+
+    expired_header = {"Authorization": f"Bearer {make_test_supabase_jwt(exp_offset_seconds=-120)}"}
+    invalid_header = {"Authorization": "Bearer malformed.jwt.token"}
+
+    protected_posts = [
+        ("/api/chat/stream", {"message": "Who won Bahrain 2023?"}),
+        ("/a2a/historical/query", {"question": "Who won Bahrain 2023?"}),
+        ("/a2a/telemetry/compare-corners", {"year": 2024, "grand_prix": "Silverstone", "driver_1": "VER", "driver_2": "NOR", "corner": "Copse"}),
+        ("/a2a/telemetry/compare-lap", {"year": 2024, "grand_prix": "Montreal", "driver_1": "RUS", "driver_2": "VER"}),
+        ("/a2a/telemetry/tyre-stints", {"year": 2024, "grand_prix": "Monza", "drivers": ["LEC"]}),
+        ("/a2a/research/query", {"query": "2026 F1 engine rules"}),
+        ("/a2a/viz/render", {"dataset_id": "nonexistent", "domain": "historical_sql"}),
+    ]
+
+    with TestClient(app) as client:
+        # Public monitoring & discovery routes remain open without credentials
+        for public_path in ("/", "/health", "/api/health", "/a2a/historical/.well-known/agent-card.json"):
+            pub_res = client.get(public_path)
+            assert pub_res.status_code == 200, f"Public endpoint {public_path} returned {pub_res.status_code}"
+
+        # /api/auth/me enforces missing, invalid, expired, and accepts valid
+        assert client.get("/api/auth/me").status_code == 401
+        assert client.get("/api/auth/me", headers=invalid_header).status_code == 401
+        assert client.get("/api/auth/me", headers=expired_header).status_code == 401
+        assert client.get("/api/auth/me", headers=auth_header).status_code == 200
+
+        # Protected chat & A2A routes reject missing, invalid, and expired tokens with 401
+        for path, payload in protected_posts:
+            assert client.post(path, json=payload).status_code == 401, f"{path} must reject missing token"
+            assert client.post(path, json=payload, headers=invalid_header).status_code == 401, f"{path} must reject invalid token"
+            assert client.post(path, json=payload, headers=expired_header).status_code == 401, f"{path} must reject expired token"
 
 
 def test_fastf1_semaphore_and_seeded_research_cache(tmp_path, monkeypatch):

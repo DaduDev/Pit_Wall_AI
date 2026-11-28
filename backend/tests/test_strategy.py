@@ -238,22 +238,28 @@ def test_format_trace_event_strategy_unpacking():
     assert '"future_phase_field": "valid"' in future_trace_event
 
 
-def test_orchestrator_stream_query_tyre_stint_strategy():
+def test_orchestrator_stream_query_tyre_stint_strategy(auth_header):
     """
     Regression test exercising the tyre-stint branch of orchestrator.stream_query.
     Verifies that status, trace, chart, text, and done SSE events emit cleanly
     with zero TypeError.
     """
+    from backend.app.a2a.client import reset_active_auth_header, set_active_auth_header
+
     async def _run():
         orchestrator = RaceEngineerOrchestrator()
         session = ConversationSession(session_id="test-strategy-stream-regression", user_id="test_user")
 
         events = []
-        async for event_str in orchestrator.stream_query(
-            user_message="Compare Leclerc vs Piastri tyre degradation and stint strategy at 2024 Italian GP",
-            session=session,
-        ):
-            events.append(event_str)
+        tok = set_active_auth_header(auth_header["Authorization"])
+        try:
+            async for event_str in orchestrator.stream_query(
+                user_message="Compare Leclerc vs Piastri tyre degradation and stint strategy at 2024 Italian GP",
+                session=session,
+            ):
+                events.append(event_str)
+        finally:
+            reset_active_auth_header(tok)
 
         full_stream = "".join(events)
 
@@ -273,7 +279,7 @@ def test_orchestrator_stream_query_tyre_stint_strategy():
     asyncio.run(_run())
 
 
-def test_chat_stream_endpoint_tyre_stint_strategy():
+def test_chat_stream_endpoint_tyre_stint_strategy(auth_header):
     """
     End-to-end regression test for POST /api/chat/stream with tyre stint query.
     Verifies HTTP 200 and all SSE frames emit cleanly with zero TypeError.
@@ -282,6 +288,7 @@ def test_chat_stream_endpoint_tyre_stint_strategy():
         response = client.post(
             "/api/chat/stream",
             json={"message": "Show tyre degradation and race pace for Leclerc at Monza 2024"},
+            headers=auth_header,
         )
         assert response.status_code == 200
         text = response.text
@@ -297,7 +304,7 @@ def test_chat_stream_endpoint_tyre_stint_strategy():
         assert "LEC" in text
 
 
-def test_back_to_back_tyre_queries_isolation():
+def test_back_to_back_tyre_queries_isolation(auth_header):
     """
     Validates driver inheritance, single-driver support, and cache key isolation across
     3 sequential back-to-back queries on the same ConversationSession:
@@ -311,6 +318,8 @@ def test_back_to_back_tyre_queries_isolation():
     - chart.metadata.drivers accurately reflects requested drivers for each query.
     - Status, trace, chart, text, and done frames are cleanly streamed.
     """
+    from backend.app.a2a.client import reset_active_auth_header, set_active_auth_header
+
     async def _run():
         import json
         orchestrator = RaceEngineerOrchestrator()
@@ -319,12 +328,16 @@ def test_back_to_back_tyre_queries_isolation():
         async def execute_query(user_msg: str):
             chart_event_data = None
             trace_event_data = None
-            async for event_str in orchestrator.stream_query(user_message=user_msg, session=session):
-                for line in event_str.split("\n"):
-                    if line.startswith("data: ") and '"chart_type"' in line:
-                        chart_event_data = json.loads(line[6:])
-                    elif line.startswith("data: ") and '"data_domain"' in line:
-                        trace_event_data = json.loads(line[6:])
+            tok = set_active_auth_header(auth_header["Authorization"])
+            try:
+                async for event_str in orchestrator.stream_query(user_message=user_msg, session=session):
+                    for line in event_str.split("\n"):
+                        if line.startswith("data: ") and '"chart_type"' in line:
+                            chart_event_data = json.loads(line[6:])
+                        elif line.startswith("data: ") and '"data_domain"' in line:
+                            trace_event_data = json.loads(line[6:])
+            finally:
+                reset_active_auth_header(tok)
             return chart_event_data, trace_event_data
 
         # Query 1: LEC vs PIA at Monza

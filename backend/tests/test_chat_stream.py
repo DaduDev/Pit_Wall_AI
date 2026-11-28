@@ -10,12 +10,13 @@ from fastapi.testclient import TestClient
 from backend.app.main import app
 
 
-def test_chat_stream_historical_query():
+def test_chat_stream_historical_query(auth_header):
     """Tests full streaming cycle for historical Q&A query."""
     with TestClient(app) as client:
         response = client.post(
             "/api/chat/stream",
             json={"message": "Who won the 2023 Bahrain Grand Prix?"},
+            headers=auth_header,
         )
         assert response.status_code == 200
         text = response.text
@@ -32,12 +33,13 @@ def test_chat_stream_historical_query():
         assert "Red Bull" in text or "v_race_results" in text
 
 
-def test_chat_stream_with_chart_generation():
+def test_chat_stream_with_chart_generation(auth_header):
     """Tests query that automatically generates and streams a Plotly chart."""
     with TestClient(app) as client:
         response = client.post(
             "/api/chat/stream",
             json={"message": "Show me Lewis Hamilton podium finishes per season"},
+            headers=auth_header,
         )
         assert response.status_code == 200
         text = response.text
@@ -47,12 +49,13 @@ def test_chat_stream_with_chart_generation():
         assert "podium" in text.lower() or "ham" in text.lower()
 
 
-def test_chat_stream_corner_comparison():
+def test_chat_stream_corner_comparison(auth_header):
     """Tests query comparing two drivers through a corner with multi-panel chart & mini-map."""
     with TestClient(app) as client:
         response = client.post(
             "/api/chat/stream",
             json={"message": "Compare Verstappen and Norris through Copse at 2024 British GP Qualifying"},
+            headers=auth_header,
         )
         assert response.status_code == 200
         text = response.text

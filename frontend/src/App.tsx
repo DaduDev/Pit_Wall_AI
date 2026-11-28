@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { LogOut, Plus, Radio } from 'lucide-react';
+import { Loader2, LogOut, Plus, Radio } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import { useSSEStream } from './hooks/useSSEStream';
 import { LoginPage } from './components/Auth/LoginPage';
@@ -9,8 +9,28 @@ import { ComposerBar } from './components/ChatPanel/ComposerBar';
 import { ErrorBoundary } from './components/ErrorBoundary/ErrorBoundary';
 
 export default function App() {
-  const { user, token, isAuthenticated, isLoading, error, login, logout } = useAuth();
-  const { messages, isStreaming, sendMessage, resetChat } = useSSEStream(token);
+  const {
+    user,
+    isAuthenticated,
+    isInitializing,
+    isLoading,
+    error,
+    confirmationMessage,
+    signIn,
+    signUp,
+    signOut,
+    clearFeedback,
+    handleUnauthorized,
+  } = useAuth();
+
+  const onSessionExpired = useCallback(
+    (msg?: string) => {
+      void handleUnauthorized(msg);
+    },
+    [handleUnauthorized]
+  );
+
+  const { messages, isStreaming, sendMessage, resetChat } = useSSEStream(onSessionExpired);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const feedContentRef = useRef<HTMLDivElement>(null);
@@ -93,8 +113,31 @@ export default function App() {
     return () => observer.disconnect();
   }, [messages.length, scrollToBottom]);
 
+  const handleSignOut = async () => {
+    resetChat();
+    await signOut();
+  };
+
+  if (isInitializing) {
+    return (
+      <div className="flex h-screen w-screen flex-col items-center justify-center bg-[#0B0F17] font-mono text-xs text-[#94A3B8]">
+        <Loader2 className="mb-3 h-6 w-6 animate-spin text-[#E10600]" />
+        <span>VERIFYING PITWALL SESSION...</span>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
-    return <LoginPage onLogin={login} isLoading={isLoading} error={error} />;
+    return (
+      <LoginPage
+        onSignIn={signIn}
+        onSignUp={signUp}
+        onClearFeedback={clearFeedback}
+        isLoading={isLoading}
+        error={error}
+        confirmationMessage={confirmationMessage}
+      />
+    );
   }
 
   return (
@@ -140,7 +183,7 @@ export default function App() {
             </span>
             <button
               type="button"
-              onClick={logout}
+              onClick={handleSignOut}
               title="Sign Out"
               className="rounded p-1.5 text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#EF4444] transition-colors"
             >

@@ -8,6 +8,9 @@ export interface AuthState {
   user: User | null;
   token: string | null;
   isAuthenticated: boolean;
+  isInitializing: boolean;
+  confirmationMessage: string | null;
+  error: string | null;
 }
 
 export interface ChatMessage {

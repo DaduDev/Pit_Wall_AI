@@ -13,6 +13,7 @@ Records all A2A hops (agent, endpoint, latency, dataset_id, status) for live tra
 
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
 import logging
 import os
 import time
@@ -20,6 +21,24 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 logger = logging.getLogger("pitwall.a2a.client")
+
+# Propagates verified caller Authorization header cleanly across internal A2A hops
+_ACTIVE_AUTH_HEADER: ContextVar[Optional[str]] = ContextVar("pitwall_active_auth_header", default=None)
+
+
+def set_active_auth_header(auth_header: Optional[str]) -> Token:
+    """Bind verified Bearer Authorization header for downstream A2A specialist calls."""
+    return _ACTIVE_AUTH_HEADER.set(auth_header)
+
+
+def reset_active_auth_header(token: Token) -> None:
+    """Restore previous Authorization header context after request finishes."""
+    _ACTIVE_AUTH_HEADER.reset(token)
+
+
+def get_active_auth_header() -> Optional[str]:
+    """Read active caller Authorization header if bound."""
+    return _ACTIVE_AUTH_HEADER.get()
 
 
 class A2AHopRecord:
@@ -86,7 +105,12 @@ class A2AClient:
         return self._app
 
     def _get_http_client(self) -> httpx.AsyncClient:
-        """Returns or instantiates the httpx.AsyncClient with appropriate transport."""
+        """Returns or instantiates the httpx.AsyncClient with appropriate transport and auth forwarding."""
+        async def _inject_auth_header(request: httpx.Request) -> None:
+            auth_val = get_active_auth_header()
+            if auth_val and "Authorization" not in request.headers:
+                request.headers["Authorization"] = auth_val
+
         if self._client is None or self._client.is_closed:
             if self.use_asgi:
                 app_instance = self._ensure_app()
@@ -95,12 +119,14 @@ class A2AClient:
                     transport=transport,
                     base_url="http://pitwall.internal",
                     timeout=180.0,
+                    event_hooks={"request": [_inject_auth_header]},
                 )
             else:
                 base = self.env_base_url or "http://127.0.0.1:8000"
                 self._client = httpx.AsyncClient(
                     base_url=base,
                     timeout=180.0,
+                    event_hooks={"request": [_inject_auth_header]},
                 )
         return self._client
 

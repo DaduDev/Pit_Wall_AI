@@ -18,11 +18,41 @@ def duckdb_conn():
     manager.create_views()
     return manager.get_connection()
 
+TEST_SUPABASE_URL = "https://pitwall-test.supabase.co"
+TEST_SUPABASE_JWT_SECRET = "pitwall-test-hs256-signing-secret-32bytes"
+
+
+def make_test_supabase_jwt(
+    *,
+    sub: str = "usr_test_001",
+    email: str = "engineer@pitwall.test",
+    display_name: str = "Test Engineer",
+    aud: str = "authenticated",
+    exp_offset_seconds: int = 3600,
+    secret: str = TEST_SUPABASE_JWT_SECRET,
+) -> str:
+    """Mint a deterministic HS256 Supabase-shaped JWT for offline pytest suites."""
+    from datetime import datetime, timedelta, timezone
+    import jwt
+
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": sub,
+        "email": email,
+        "aud": aud,
+        "role": "authenticated",
+        "iss": f"{TEST_SUPABASE_URL}/auth/v1",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=exp_offset_seconds)).timestamp()),
+        "user_metadata": {"display_name": display_name},
+    }
+    return jwt.encode(payload, secret, algorithm="HS256")
+
+
 @pytest.fixture
 def auth_header():
-    """Generates a valid JWT auth header for test users."""
-    from backend.app.auth.dependencies import create_access_token
-    token = create_access_token({"sub": "test@pitwall.ai", "user_id": "test_user_1"})
+    """Generates a valid stateless Supabase Bearer auth header for test users."""
+    token = make_test_supabase_jwt()
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -37,12 +67,17 @@ def protect_gemini_search_quota(monkeypatch):
         return
 
     import backend.app.llm.failover_client as fc
+    from backend.app.auth.dependencies import clear_jwk_cache
     from backend.app.cache import get_query_cache
     from backend.app.chat.router import rate_limiter
 
     fc.reset_gemini_cooldown()
+    clear_jwk_cache()
     get_query_cache().clear()
     rate_limiter.reset()
+    monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SUPABASE_JWT_SECRET)
+    monkeypatch.setenv("SUPABASE_JWT_AUDIENCE", "authenticated")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("APP_ENV", raising=False)

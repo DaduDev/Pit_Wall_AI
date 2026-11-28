@@ -46,7 +46,7 @@ def client():
 # Test 1: Corner Telemetry Suzuka 130R
 # ---------------------------------------------------------------------------
 
-def test_e2e_corner_telemetry_suzuka_130r(client):
+def test_e2e_corner_telemetry_suzuka_130r(client, auth_header):
     """
     Asserts corner comparison through Suzuka 130R routes via TelemetryAgent + PresentationAgent,
     returns real km/h speeds, and yields valid Plotly figure.
@@ -54,6 +54,7 @@ def test_e2e_corner_telemetry_suzuka_130r(client):
     res = client.post(
         "/api/chat/stream",
         json={"message": "Compare Verstappen and Norris through 130R at 2024 Japanese GP Qualifying"},
+        headers=auth_header,
     )
     assert res.status_code == 200, f"Failed: {res.text}"
     events = parse_sse_events(res.text)
@@ -93,7 +94,7 @@ def test_e2e_corner_telemetry_suzuka_130r(client):
 # Test 2: Full-Lap Telemetry Montreal Russell vs Verstappen
 # ---------------------------------------------------------------------------
 
-def test_e2e_full_lap_montreal(client):
+def test_e2e_full_lap_montreal(client, auth_header):
     """
     Asserts full-lap comparison for Montreal 2024 Qualifying returns valid figure,
     zero NaN tokens, and metadata.drivers with [RUS, VER].
@@ -101,6 +102,7 @@ def test_e2e_full_lap_montreal(client):
     res = client.post(
         "/api/chat/stream",
         json={"message": "Overlay Russell vs Verstappen full lap at 2024 Canadian GP Qualifying"},
+        headers=auth_header,
     )
     assert res.status_code == 200
     assert "NaN" not in res.text, "Stream must never leak raw NaN tokens!"
@@ -133,7 +135,7 @@ def test_e2e_full_lap_montreal(client):
 # Test 3: Tyre Stints Pair vs Solo Follow-up
 # ---------------------------------------------------------------------------
 
-def test_e2e_tyre_stints_pair_and_solo_isolation(client):
+def test_e2e_tyre_stints_pair_and_solo_isolation(client, auth_header):
     """
     Validates driver inheritance and dataset_id isolation across back-to-back queries:
     1. LEC vs PIA at 2024 Italian GP
@@ -143,6 +145,7 @@ def test_e2e_tyre_stints_pair_and_solo_isolation(client):
     res1 = client.post(
         "/api/chat/stream",
         json={"message": "Compare Leclerc vs Piastri tyre degradation and stint strategy at 2024 Italian GP"},
+        headers=auth_header,
     )
     assert res1.status_code == 200
     events1 = parse_sse_events(res1.text)
@@ -158,6 +161,7 @@ def test_e2e_tyre_stints_pair_and_solo_isolation(client):
             "session_id": session_id,
             "message": "Show tyre degradation and race pace for Leclerc at Monza 2024",
         },
+        headers=auth_header,
     )
     assert res2.status_code == 200
     events2 = parse_sse_events(res2.text)
@@ -179,7 +183,7 @@ def test_e2e_tyre_stints_pair_and_solo_isolation(client):
 # Test 4: Historical SQL 2021 Brazil Winner
 # ---------------------------------------------------------------------------
 
-def test_e2e_historical_sql_brazil_2021(client):
+def test_e2e_historical_sql_brazil_2021(client, auth_header):
     """
     Asserts historical SQL 1-row query resolves 2021 Brazilian Grand Prix,
     returns top-level viz_type == 'kpi_card' with zero raw 'Dataset stored under' / 'Retrieved 1 rows' leaks,
@@ -188,6 +192,7 @@ def test_e2e_historical_sql_brazil_2021(client):
     res = client.post(
         "/api/chat/stream",
         json={"message": "Who won the 2021 Brazilian Grand Prix and what was the winning margin over P2?"},
+        headers=auth_header,
     )
     assert res.status_code == 200
     events = parse_sse_events(res.text)
@@ -221,7 +226,7 @@ def test_e2e_historical_sql_brazil_2021(client):
 # Test 5: Web Research 2021 Brazil Turn 4 Incident
 # ---------------------------------------------------------------------------
 
-def test_e2e_web_research_incident(client):
+def test_e2e_web_research_incident(client, auth_header):
     """
     Asserts research inquiry hops through ResearchAgent + PresentationAgent,
     preserves top-level viz_type == 'web_intelligence_card', and returns clickable source URLs.
@@ -229,6 +234,7 @@ def test_e2e_web_research_incident(client):
     res = client.post(
         "/api/chat/stream",
         json={"message": "What happened between Verstappen and Hamilton at Turn 4 during the 2021 Brazilian GP?"},
+        headers=auth_header,
     )
     assert res.status_code == 200
     events = parse_sse_events(res.text)
@@ -257,7 +263,7 @@ def test_e2e_web_research_incident(client):
 # Test 6: Era Refusal & Invalid Corner Self-Healing / Error Feedback
 # ---------------------------------------------------------------------------
 
-def test_e2e_era_refusal_and_invalid_corner(client):
+def test_e2e_era_refusal_and_invalid_corner(client, auth_header):
     """
     Verifies that:
     1. Pre-2023 telemetry request yields clear era boundary notice.
@@ -267,6 +273,7 @@ def test_e2e_era_refusal_and_invalid_corner(client):
     res_era = client.post(
         "/api/chat/stream",
         json={"message": "Compare Verstappen and Hamilton telemetry at 2021 Brazil GP"},
+        headers=auth_header,
     )
     assert res_era.status_code == 200
     events_era = parse_sse_events(res_era.text)
@@ -278,6 +285,7 @@ def test_e2e_era_refusal_and_invalid_corner(client):
     res_invalid = client.post(
         "/api/chat/stream",
         json={"message": "Compare Verstappen and Norris through Turn 99 at 2024 Suzuka"},
+        headers=auth_header,
     )
     assert res_invalid.status_code == 200
     events_invalid = parse_sse_events(res_invalid.text)

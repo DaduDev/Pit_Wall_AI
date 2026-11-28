@@ -291,9 +291,9 @@ def test_presentation_agent_renders_viz_specs():
 # Test 6: Telemetry Agent Suzuka 130R Corner Telemetry via API & Viz
 # ---------------------------------------------------------------------------
 
-def test_telemetry_compare_corners_suzuka_130r(client):
+def test_telemetry_compare_corners_suzuka_130r(client, auth_header):
     """Verify POST /a2a/telemetry/compare-corners resolves 130R to Turn 15, stores artifact and renders viz."""
-    res = client.post("/a2a/telemetry/compare-corners", json={
+    res = client.post("/a2a/telemetry/compare-corners", headers=auth_header, json={
         "year": 2024,
         "grand_prix": "Suzuka",
         "session_type": "Qualifying",
@@ -312,7 +312,7 @@ def test_telemetry_compare_corners_suzuka_130r(client):
     assert "Apex speeds: {}" not in data["summary"]
 
     # Verify rendering via PresentationAgent
-    r_viz = client.post("/a2a/viz/render", json={
+    r_viz = client.post("/a2a/viz/render", headers=auth_header, json={
         "dataset_id": data["dataset_id"],
         "domain": "corner_telemetry",
     })
@@ -329,9 +329,9 @@ def test_telemetry_compare_corners_suzuka_130r(client):
 # Test 7: Telemetry Agent Montreal Russell vs Verstappen 0.000s Delta
 # ---------------------------------------------------------------------------
 
-def test_telemetry_compare_full_lap_montreal(client):
+def test_telemetry_compare_full_lap_montreal(client, auth_header):
     """Verify POST /a2a/telemetry/compare-lap computes Montreal 1:12.000 vs 1:12.000 (0.000s delta) and renders."""
-    res = client.post("/a2a/telemetry/compare-lap", json={
+    res = client.post("/a2a/telemetry/compare-lap", headers=auth_header, json={
         "year": 2024,
         "grand_prix": "Canadian Grand Prix",
         "session_type": "Qualifying",
@@ -353,7 +353,7 @@ def test_telemetry_compare_full_lap_montreal(client):
     assert data["faster_driver"] == "TIE"
 
     # Verify rendering via PresentationAgent
-    r_viz = client.post("/a2a/viz/render", json={
+    r_viz = client.post("/a2a/viz/render", headers=auth_header, json={
         "dataset_id": data["dataset_id"],
         "domain": "full_lap_telemetry",
     })
@@ -370,10 +370,10 @@ def test_telemetry_compare_full_lap_montreal(client):
 # Test 8: Telemetry Agent Tyre Stints Monza 2024 (Pair vs Solo LEC)
 # ---------------------------------------------------------------------------
 
-def test_telemetry_tyre_stints_pair_and_solo(client):
+def test_telemetry_tyre_stints_pair_and_solo(client, auth_header):
     """Verify POST /a2a/telemetry/tyre-stints returns distinct dataset_ids and solo LEC renders only Leclerc."""
     # Pair: LEC vs PIA
-    res_pair = client.post("/a2a/telemetry/tyre-stints", json={
+    res_pair = client.post("/a2a/telemetry/tyre-stints", headers=auth_header, json={
         "year": 2024,
         "grand_prix": "Italian Grand Prix",
         "session_type": "Race",
@@ -385,7 +385,7 @@ def test_telemetry_tyre_stints_pair_and_solo(client):
     assert data_pair["dataset_id"] is not None
 
     # Solo: LEC
-    res_solo = client.post("/a2a/telemetry/tyre-stints", json={
+    res_solo = client.post("/a2a/telemetry/tyre-stints", headers=auth_header, json={
         "year": 2024,
         "grand_prix": "Italian Grand Prix",
         "session_type": "Race",
@@ -398,7 +398,7 @@ def test_telemetry_tyre_stints_pair_and_solo(client):
     assert data_pair["dataset_id"] != data_solo["dataset_id"], "Dataset IDs must be distinct"
 
     # Verify solo LEC renders with only Leclerc driver metadata
-    r_viz_solo = client.post("/a2a/viz/render", json={
+    r_viz_solo = client.post("/a2a/viz/render", headers=auth_header, json={
         "dataset_id": data_solo["dataset_id"],
         "domain": "tyre_degradation",
     })
@@ -415,10 +415,10 @@ def test_telemetry_tyre_stints_pair_and_solo(client):
 # Test 9: Historical SQL Agent NL Question & 0-Row Guardrail
 # ---------------------------------------------------------------------------
 
-def test_historical_agent_nl_and_zero_row_guardrail(client):
+def test_historical_agent_nl_and_zero_row_guardrail(client, auth_header):
     """Verify HistoricalSQLAgent supports natural language questions and does not store 0-row artifacts."""
     # Natural Language question
-    res_nl = client.post("/a2a/historical/query", json={
+    res_nl = client.post("/a2a/historical/query", headers=auth_header, json={
         "question": "Who won the 2021 Brazilian Grand Prix?",
     })
     assert res_nl.status_code == 200, f"NL query failed: {res_nl.text}"
@@ -432,7 +432,7 @@ def test_historical_agent_nl_and_zero_row_guardrail(client):
     )
 
     # 0-Row Query: must return success: False and dataset_id: None (never stored)
-    res_zero = client.post("/a2a/historical/query", json={
+    res_zero = client.post("/a2a/historical/query", headers=auth_header, json={
         "sql": "SELECT driver_code FROM v_race_results WHERE year = 1800",
     })
     assert res_zero.status_code == 200
@@ -446,7 +446,7 @@ def test_historical_agent_nl_and_zero_row_guardrail(client):
 # Test 10: Research Agent Structured Sources and Offline Fallback
 # ---------------------------------------------------------------------------
 
-def test_research_agent_sources_and_offline_fallback(client):
+def test_research_agent_sources_and_offline_fallback(client, auth_header):
     """Verify ResearchAgent returns structured sources [{title, url}], dataset_id, and renders web_card."""
     agent = get_research_agent()
     result = agent.research_topic("What happened between Verstappen and Hamilton at Turn 4 during the 2021 Brazilian GP?")
@@ -462,7 +462,7 @@ def test_research_agent_sources_and_offline_fallback(client):
     assert "grounded" in result
 
     # Viz rendering
-    r_viz = client.post("/a2a/viz/render", json={
+    r_viz = client.post("/a2a/viz/render", headers=auth_header, json={
         "dataset_id": result["dataset_id"],
         "domain": "research",
     })

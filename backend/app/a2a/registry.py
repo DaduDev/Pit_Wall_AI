@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from google.protobuf.json_format import MessageToDict
 from pydantic import BaseModel
+
+from backend.app.auth.dependencies import UserResponse, get_current_user
 
 from backend.app.a2a.agents.historical_agent import (
     HistoricalSQLAgent,
@@ -113,7 +115,10 @@ async def historical_agent_card():
 
 
 @router.post("/historical/query")
-async def historical_query(req: HistoricalQueryRequest):
+async def historical_query(
+    req: HistoricalQueryRequest,
+    _user: UserResponse = Depends(get_current_user),
+):
     """Direct query endpoint for HistoricalSQLAgent (supports SQL or natural language questions)."""
     agent = get_historical_agent()
     if req.question:
@@ -124,7 +129,10 @@ async def historical_query(req: HistoricalQueryRequest):
 
 
 @router.post("/historical")
-async def historical_rpc(request: Request):
+async def historical_rpc(
+    request: Request,
+    _user: UserResponse = Depends(get_current_user),
+):
     """JSON-RPC / A2A generic execution endpoint for HistoricalSQLAgent."""
     body = await request.json()
     agent = get_historical_agent()
@@ -158,7 +166,10 @@ async def telemetry_agent_card():
 
 
 @router.post("/telemetry/compare-corners")
-async def telemetry_compare_corners(req: CornerCompareRequest):
+async def telemetry_compare_corners(
+    req: CornerCompareRequest,
+    _user: UserResponse = Depends(get_current_user),
+):
     """Direct corner comparison endpoint for TelemetryAgent."""
     agent = get_telemetry_agent()
     return agent.compare_corners(
@@ -174,7 +185,10 @@ async def telemetry_compare_corners(req: CornerCompareRequest):
 
 
 @router.post("/telemetry/compare-lap")
-async def telemetry_compare_lap(req: FullLapCompareRequest):
+async def telemetry_compare_lap(
+    req: FullLapCompareRequest,
+    _user: UserResponse = Depends(get_current_user),
+):
     """Direct full-lap overlay endpoint for TelemetryAgent."""
     agent = get_telemetry_agent()
     return agent.compare_full_lap(
@@ -189,7 +203,10 @@ async def telemetry_compare_lap(req: FullLapCompareRequest):
 
 
 @router.post("/telemetry/tyre-stints")
-async def telemetry_tyre_stints(req: TyreStintsRequest):
+async def telemetry_tyre_stints(
+    req: TyreStintsRequest,
+    _user: UserResponse = Depends(get_current_user),
+):
     """Direct tyre degradation endpoint for TelemetryAgent."""
     agent = get_telemetry_agent()
     return agent.analyze_tyre_stints(
@@ -201,7 +218,10 @@ async def telemetry_tyre_stints(req: TyreStintsRequest):
 
 
 @router.post("/telemetry")
-async def telemetry_rpc(request: Request):
+async def telemetry_rpc(
+    request: Request,
+    _user: UserResponse = Depends(get_current_user),
+):
     """JSON-RPC / A2A generic execution endpoint for TelemetryAgent."""
     body = await request.json()
     params = body.get("params", body)
@@ -250,21 +270,30 @@ async def research_agent_card():
 
 
 @router.post("/research/query")
-async def research_query(req: ResearchQueryRequest):
+async def research_query(
+    req: ResearchQueryRequest,
+    _user: UserResponse = Depends(get_current_user),
+):
     """Direct research query endpoint for ResearchAgent."""
     agent = get_research_agent()
     return agent.research_topic(req.query)
 
 
 @router.post("/research/resolve-corner")
-async def research_resolve_corner(req: ResolveCornerRequest):
+async def research_resolve_corner(
+    req: ResolveCornerRequest,
+    _user: UserResponse = Depends(get_current_user),
+):
     """Direct corner nickname learning & MultiViewer geometry validation endpoint for ResearchAgent."""
     agent = get_research_agent()
     return agent.resolve_and_learn_corner(circuit=req.circuit, corner_query=req.corner_query)
 
 
 @router.post("/research")
-async def research_rpc(request: Request):
+async def research_rpc(
+    request: Request,
+    _user: UserResponse = Depends(get_current_user),
+):
     """JSON-RPC / A2A generic execution endpoint for ResearchAgent."""
     body = await request.json()
     params = body.get("params", body)
@@ -292,7 +321,10 @@ async def presentation_agent_card():
 
 
 @router.post("/viz/render")
-async def presentation_render(req: VizRenderRequest):
+async def presentation_render(
+    req: VizRenderRequest,
+    _user: UserResponse = Depends(get_current_user),
+):
     """Direct visualization render endpoint for PresentationAgent."""
     agent = get_presentation_agent()
     return agent.render_visualization(
@@ -305,7 +337,10 @@ async def presentation_render(req: VizRenderRequest):
 
 
 @router.post("/viz")
-async def presentation_rpc(request: Request):
+async def presentation_rpc(
+    request: Request,
+    _user: UserResponse = Depends(get_current_user),
+):
     """JSON-RPC / A2A generic execution endpoint for PresentationAgent."""
     body = await request.json()
     params = body.get("params", body)

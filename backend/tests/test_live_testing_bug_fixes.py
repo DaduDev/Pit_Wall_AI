@@ -12,6 +12,7 @@ import pytest
 import asyncio
 from backend.app.chat.session import ConversationSession
 from backend.app.agent.orchestrator import RaceEngineerOrchestrator
+from backend.app.a2a.client import set_active_auth_header, reset_active_auth_header
 from backend.app.agent.tools.telemetry import load_driver_lap
 from backend.app.agent.tools.corner_compare import compare_corner_telemetry
 from backend.app.agent.tools.historical_sql import query_historical_f1
@@ -122,7 +123,7 @@ def test_monza_turn_1_cached_openf1_telemetry():
     assert gear_b == 2
 
 
-def test_orchestrator_era_boundary_routes_to_historical():
+def test_orchestrator_era_boundary_routes_to_historical(auth_header):
     """
     Orchestrator test: Asking for 2021 Brazil GP telemetry between Verstappen and Hamilton
     must trigger the era boundary event and return historical DuckDB race results
@@ -131,13 +132,17 @@ def test_orchestrator_era_boundary_routes_to_historical():
     async def _run():
         orchestrator = RaceEngineerOrchestrator()
         session = ConversationSession(session_id="test_era", user_id="test_user")
+        token = set_active_auth_header(auth_header["Authorization"])
 
         events = []
-        async for event_str in orchestrator.stream_query(
-            "Compare Verstappen and Hamilton through Turn 9 at 2021 Brazil GP",
-            session,
-        ):
-            events.append(event_str)
+        try:
+            async for event_str in orchestrator.stream_query(
+                "Compare Verstappen and Hamilton through Turn 9 at 2021 Brazil GP",
+                session,
+            ):
+                events.append(event_str)
+        finally:
+            reset_active_auth_header(token)
 
         full_output = "".join(events)
         assert '"step": "era_boundary"' in full_output or "Telemetry Era Boundary Notice" in full_output
@@ -181,7 +186,7 @@ def test_orchestrator_multi_turn_context_inheritance():
     assert intent["corner"] == "130R"
 
 
-def test_orchestrator_kills_phantom_sql_query():
+def test_orchestrator_kills_phantom_sql_query(auth_header):
     """
     Orchestrator test: An ambiguous query that cannot be formulated into SQL
     returns a clear clarifying question and NEVER runs the hardcoded 2023 Abu Dhabi query.
@@ -189,13 +194,17 @@ def test_orchestrator_kills_phantom_sql_query():
     async def _run():
         orchestrator = RaceEngineerOrchestrator()
         session = ConversationSession(session_id="test_clarify", user_id="test_user")
+        token = set_active_auth_header(auth_header["Authorization"])
 
         events = []
-        async for event_str in orchestrator.stream_query(
-            "asdfghjkl random gibberish non f1 query",
-            session,
-        ):
-            events.append(event_str)
+        try:
+            async for event_str in orchestrator.stream_query(
+                "asdfghjkl random gibberish non f1 query",
+                session,
+            ):
+                events.append(event_str)
+        finally:
+            reset_active_auth_header(token)
 
         full_output = "".join(events)
         # Must NOT run 2023 Abu Dhabi query

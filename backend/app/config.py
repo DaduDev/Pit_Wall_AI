@@ -57,7 +57,10 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = Field(default="http://127.0.0.1:11434/api/chat")
     SEMAPHORE_CONCURRENCY: int = 3
 
-    # Authentication & Security
+    # Authentication & Security (Stateless Supabase Auth)
+    SUPABASE_URL: str = Field(default="")
+    SUPABASE_JWT_SECRET: str = Field(default="")
+    SUPABASE_JWT_AUDIENCE: str = Field(default="authenticated")
     JWT_SECRET: str = Field(default="pitwall-secret-key-change-in-production-f1-race-engineer")
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_HOURS: int = 24

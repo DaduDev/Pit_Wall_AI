@@ -1,10 +1,34 @@
-const API_BASE = (import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:8000" : "")).replace(/\/$/, "");
+import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
+
+const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
 
 export { API_BASE };
 
 export function apiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${API_BASE}${cleanPath}`;
+}
+
+export async function getAccessToken(): Promise<string | null> {
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+  const { data, error } = await getSupabaseClient().auth.getSession();
+  if (error || !data.session?.access_token) {
+    return null;
+  }
+  return data.session.access_token;
+}
+
+export async function authHeaders(
+  extra: Record<string, string> = {}
+): Promise<Record<string, string>> {
+  const token = await getAccessToken();
+  const headers: Record<string, string> = { ...extra };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 export async function fetchHealth(): Promise<any> {

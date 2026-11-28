@@ -9,10 +9,12 @@ import os
 import threading
 import time
 from typing import Dict, Optional
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from backend.app.a2a.client import reset_active_auth_header, set_active_auth_header
+from backend.app.auth.dependencies import UserResponse, get_current_user
 from backend.app.config import settings
 from backend.app.chat.session import session_manager
 from backend.app.chat.streaming import (
@@ -81,7 +83,11 @@ class ChatStreamRequest(BaseModel):
 
 
 @router.post("/stream")
-async def chat_stream(body: ChatStreamRequest, request: Request):
+async def chat_stream(
+    body: ChatStreamRequest,
+    request: Request,
+    current_user: UserResponse = Depends(get_current_user),
+):
     """
     Primary conversational endpoint streaming real-time status, text,
     Plotly charts, and engineering traces over Server-Sent Events (SSE).
@@ -101,11 +107,13 @@ async def chat_stream(body: ChatStreamRequest, request: Request):
             },
         )
 
-    session = session_manager.get_or_create(session_id=body.session_id)
+    session = session_manager.get_or_create(session_id=body.session_id, user_id=current_user.id)
+    auth_header_value = request.headers.get("authorization")
 
     async def event_generator():
         t_start = time.perf_counter()
         emitted_done = False
+        ctx_token = set_active_auth_header(auth_header_value)
         try:
             # Emit session event first
             yield format_session_event(session.session_id)
@@ -127,6 +135,7 @@ async def chat_stream(body: ChatStreamRequest, request: Request):
                 retryable=True,
             )
         finally:
+            reset_active_auth_header(ctx_token)
             if not emitted_done:
                 elapsed_ms = int((time.perf_counter() - t_start) * 1000)
                 yield format_done_event(total_duration_ms=elapsed_ms)
